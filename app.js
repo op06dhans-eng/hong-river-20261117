@@ -1,6 +1,3 @@
-import * as THREE from 'three';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import * as R from './rules.js';
 
 const $ = s => document.querySelector(s);
@@ -41,6 +38,7 @@ const parse = v => (v == null ? null : typeof v === 'string' ? JSON.parse(v) : v
 
 // ====================== 首頁 ======================
 if (!role || (!room && role !== 'ref')) {
+  document.getElementById('loading')?.remove();
   document.body.insertAdjacentHTML('beforeend', `
   <div id="home"><div class="card">
     <h1>泓水之戰</h1><div class="muted">雙盲推演．楚軍渡河，宋軍守國</div>
@@ -61,260 +59,100 @@ if (role === 'ref' && !room) {
   history.replaceState(null, '', `?role=ref&room=${room}`);
 }
 
-// ====================== 立體場景 ======================
-const SC = 14.75 / 1920;
-const pos = id => new THREE.Vector3((R.NODES[id].x - 960) * SC, 0, (R.NODES[id].y - 540) * SC);
-
-const host = $('#scene');
-const renderer = new THREE.WebGLRenderer({ antialias: true });
-renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
-renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-renderer.outputColorSpace = THREE.SRGBColorSpace;
-host.appendChild(renderer.domElement);
-const labelR = new CSS2DRenderer();
-labelR.domElement.style.cssText = 'position:absolute;top:0;left:0;pointer-events:none';
-host.appendChild(labelR.domElement);
-
-const scene = new THREE.Scene();
-scene.background = new THREE.Color('#1d1a15');
-const camera = new THREE.PerspectiveCamera(42, 1, 0.1, 100);
-const controls = new OrbitControls(camera, renderer.domElement);
-controls.enableDamping = true;
-controls.maxPolarAngle = 1.2; controls.minPolarAngle = 0.15;
-controls.minDistance = 3; controls.maxDistance = 18;
-controls.screenSpacePanning = false;
-controls.touches = { ONE: THREE.TOUCH.PAN, TWO: THREE.TOUCH.DOLLY_ROTATE };
-controls.mouseButtons = { LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.ROTATE };
-
-const VIEW_DIR = new THREE.Vector3(0, 0.83, 0.56).normalize();
-let fly = null;
-controls.addEventListener('start', () => { fly = null; });
-function flyTo(center, dist, instant) {
-  fly = { t: center.clone(), d: dist };
-  if (instant) { controls.target.copy(fly.t); camera.position.copy(fly.t).addScaledVector(VIEW_DIR, dist); fly = null; controls.update(); }
-}
-// 讓一組點位剛好塞進畫面
-function focusNodes(ids, instant, minD = 4.2) {
-  if (!ids.length) return;
-  const ps = ids.map(pos);
-  const min = ps.reduce((m, p) => m.min(p), ps[0].clone()), max = ps.reduce((m, p) => m.max(p), ps[0].clone());
-  const c = min.clone().add(max).multiplyScalar(0.5);
-  const w = max.x - min.x + 1.6, h = (max.z - min.z) * 0.75 + 1.6;
-  const k = 2 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
-  const d = Math.max(minD, h / k, w / (k * camera.aspect));
-  const D = Math.min(d, 18);
-  // 不讓鏡頭照到地圖板外的空白
-  c.z = Math.min(c.z, 4.15 - 0.36 * D);
-  const hw = Math.max(0, 7.37 - 0.36 * D * camera.aspect);
-  c.x = Math.max(-hw, Math.min(hw, c.x));
-  flyTo(c, D, instant);
-}
-const ALL_NODES = Object.keys(R.NODES);
-function resetCamera(instant) { focusNodes(ALL_NODES, instant, 3); }
-
-scene.add(new THREE.HemisphereLight('#fff6e0', '#4a3a28', 1.1));
-const sun = new THREE.DirectionalLight('#fff1d6', 1.6);
-sun.position.set(-5, 10, 4); sun.castShadow = true;
-sun.shadow.mapSize.set(1024, 1024);
-Object.assign(sun.shadow.camera, { left: -9, right: 9, top: 6, bottom: -6 });
-scene.add(sun);
-
-// 地圖板
-const tex = new THREE.TextureLoader().load('map.jpg');
-tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 8;
-const board = new THREE.Mesh(new THREE.PlaneGeometry(14.75, 1080 * SC), new THREE.MeshStandardMaterial({ map: tex, roughness: 0.95 }));
-board.rotation.x = -Math.PI / 2; board.receiveShadow = true; scene.add(board);
-const base = new THREE.Mesh(new THREE.BoxGeometry(15.15, 0.4, 1080 * SC + 0.4), new THREE.MeshStandardMaterial({ color: '#5b3d22', roughness: 0.8 }));
-base.position.y = -0.205; scene.add(base);
-
-// 營地
-function camp(id, color) {
-  const g = new THREE.Group(); g.position.copy(pos(id));
-  const mat = new THREE.MeshStandardMaterial({ color: '#efe3c4', roughness: 0.9 });
-  const trim = new THREE.MeshStandardMaterial({ color });
-  [[-0.42, -0.2], [-0.5, 0.18], [0.45, 0.15], [0.4, -0.25]].forEach(([x, z]) => {
-    const t = new THREE.Mesh(new THREE.ConeGeometry(0.13, 0.22, 4), mat); t.position.set(x, 0.11, z); t.rotation.y = 0.6; t.castShadow = true; g.add(t);
-    const r = new THREE.Mesh(new THREE.ConeGeometry(0.04, 0.06, 4), trim); r.position.set(x, 0.24, z); g.add(r);
-  });
-  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.015, 0.8), new THREE.MeshStandardMaterial({ color: '#3b2a18' }));
-  pole.position.set(-0.2, 0.4, -0.38); g.add(pole);
-  const flag = new THREE.Mesh(new THREE.PlaneGeometry(0.3, 0.2), new THREE.MeshStandardMaterial({ color, side: THREE.DoubleSide }));
-  flag.position.set(-0.05, 0.7, -0.38); g.add(flag);
-  scene.add(g);
-}
-camp('S', '#b3261e'); camp('H', '#1f4e9c');
-
-// 點位與路線
+// ====================== 立體場景（立體戰場移植自《國君的抉擇》，見 world.js） ======================
+const THREE = window.THREE;
 const COLORS = { red: '#b3261e', blue: '#1f4e9c', both: '#c9962c' };
-function addLabel(obj, html, cls, y = 0) {
-  const d = document.createElement('div'); d.className = cls; d.innerHTML = html;
-  const o = new CSS2DObject(d); o.position.y = y; obj.add(o); return o;
+const VIEW_SIDE = ROLE_SIDE[role] || 'red';
+window.SOLDIERS_PER = { inf: 12 };
+bootScene();
+const canvas = SCN.canvas;
+const NODE_IDS = Object.keys(R.NODES);
+const wp = id => { const n = RULES.NODES[id]; return new THREE.Vector3(n.x, Math.max(SCN.H(n.x, n.z), 0.05), n.z); };
+
+// 鏡頭：紅軍從南往北看，宋軍從北往南看
+const TH = VIEW_SIDE === 'blue' ? Math.PI : 0;
+function focusNodes(ids, instant) {
+  if (!ids.length) return;
+  const ps = ids.map(wp);
+  const c = ps.reduce((s, p) => s.add(p), new THREE.Vector3()).multiplyScalar(1 / ps.length);
+  let span = 0; for (const p of ps) span = Math.max(span, Math.hypot(p.x - c.x, p.z - c.z));
+  const aspect = canvas.clientWidth / Math.max(1, canvas.clientHeight);
+  const r = Math.max(42, Math.min(230, (span * 2 + 22) / Math.min(1.1, Math.max(0.55, aspect)) * 1.05));
+  SCN.flyOrbit({ target: new THREE.Vector3(c.x, 0, c.z), r, th: TH, ph: 0.85 }, instant);
 }
-const nodeGroup = new THREE.Group(); scene.add(nodeGroup);
-function drawNodes(viewSide) {
-  nodeGroup.clear();
-  // 路線
-  const sides = viewSide ? [viewSide] : ['red', 'blue'];
-  const done = new Set();
-  for (const s of sides) for (const [a, b, via] of R.EDGES[s]) {
-    const pts = via ? [a, via, b] : [a, b];
-    for (let i = 0; i < pts.length - 1; i++) {
-      const k = [pts[i], pts[i + 1]].sort().join('-');
-      if (done.has(k)) continue; done.add(k);
-      const p1 = pos(pts[i]), p2 = pos(pts[i + 1]);
-      const len = p1.distanceTo(p2);
-      const m = new THREE.Mesh(new THREE.BoxGeometry(len, 0.012, 0.055),
-        new THREE.MeshBasicMaterial({ color: '#f2d24b', transparent: true, opacity: 0.85 }));
-      m.position.copy(p1).lerp(p2, 0.5); m.position.y = 0.01;
-      m.rotation.y = -Math.atan2(p2.z - p1.z, p2.x - p1.x);
-      nodeGroup.add(m);
-    }
-  }
-  for (const [id, n] of Object.entries(R.NODES)) {
-    if (viewSide && n.side !== 'both' && n.side !== viewSide && id !== 'H' && id !== 'S') continue;
-    const g = new THREE.Group(); g.position.copy(pos(id));
-    const ring = new THREE.Mesh(new THREE.RingGeometry(0.16, 0.22, 40), new THREE.MeshBasicMaterial({ color: COLORS[n.side], side: THREE.DoubleSide }));
-    ring.rotation.x = -Math.PI / 2; ring.position.y = 0.02; g.add(ring);
-    const fill = new THREE.Mesh(new THREE.CircleGeometry(0.16, 32), new THREE.MeshBasicMaterial({ color: '#fff8e6', transparent: true, opacity: 0.55 }));
-    fill.rotation.x = -Math.PI / 2; fill.position.y = 0.018; g.add(fill);
-    addLabel(g, n.name, 'lbl' + (n.kind === 'river' ? ' river' : ''));
-    nodeGroup.add(g);
-  }
+function resetCamera(instant) { SCN.flyOrbit({ target: new THREE.Vector3(0, 0, -2), r: canvas.clientWidth < canvas.clientHeight ? 230 : 160, th: TH, ph: 0.82 }, instant); }
+
+// 部隊：沿用原遊戲的立體士兵（每個兵力單位畫 12 人）
+function setTokens(list, animate = true) {
+  SCN.setUnits(list.map(t => {
+    const a = t.army, ch = a.side === 'red' ? '楚' : '宋';
+    const st = a.side === 'red' && a.state && a.state !== 'formed' ? ' ' + R.STATE_LABEL[a.state] : '';
+    const label = t.ghost ? `${ch} ${a.units}？ 第${a.turn}回合目擊` : `${ch} ${a.units}${st}`;
+    return { key: (t.ghost ? 'g' : 'a') + a.id, side: a.side, type: 'inf', s: a.units, pos: { n: a.node }, label, labelCls: t.ghost ? 'ghost' : '', ghost: !!t.ghost, mine: a.side === VIEW_SIDE };
+  }), animate);
 }
 
-// 兵棋
-const tokens = new Map();   // key -> { group, target }
-const tokenLayer = new THREE.Group(); scene.add(tokenLayer);
-function bannerTex(ch, color) {
-  const c = document.createElement('canvas'); c.width = 64; c.height = 96;
-  const x = c.getContext('2d'); x.fillStyle = color; x.fillRect(0, 0, 64, 96);
-  x.strokeStyle = '#f4ecd8'; x.lineWidth = 4; x.strokeRect(4, 4, 56, 88);
-  x.fillStyle = '#fff'; x.font = 'bold 44px serif'; x.textAlign = 'center'; x.textBaseline = 'middle'; x.fillText(ch, 32, 50);
-  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
-}
-const BANNER = { red: bannerTex('楚', COLORS.red), blue: bannerTex('宋', COLORS.blue) };
-function makeToken(a, ghost) {
-  const g = new THREE.Group();
-  const op = ghost ? { transparent: true, opacity: 0.38 } : {};
-  const col = COLORS[a.side];
-  const baseM = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.27, 0.06, 28), new THREE.MeshStandardMaterial({ color: col, ...op }));
-  baseM.position.y = 0.03; baseM.castShadow = !ghost; g.add(baseM);
-  const unitMat = new THREE.MeshStandardMaterial({ color: a.side === 'red' ? '#d9543f' : '#3b6fc4', ...op });
-  for (let i = 0; i < a.units; i++) {
-    const row = Math.floor(i / 3), colI = i % 3;
-    const b = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.13, 0.1), unitMat);
-    b.position.set((colI - 1) * 0.12, 0.13, (row - 0.5) * 0.13); b.castShadow = !ghost; g.add(b);
-  }
-  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.6), new THREE.MeshStandardMaterial({ color: '#3b2a18', ...op }));
-  pole.position.set(0.22, 0.33, 0); g.add(pole);
-  const flag = new THREE.Mesh(new THREE.PlaneGeometry(0.2, 0.3), new THREE.MeshStandardMaterial({ map: BANNER[a.side], side: THREE.DoubleSide, ...op }));
-  flag.position.set(0.33, 0.5, 0); g.add(flag);
-  const st = a.side === 'red' && a.state !== 'formed' ? `<small>${R.STATE_LABEL[a.state]}</small>` : '';
-  const ex = ghost ? `<small>第${a.turn}回合目擊</small>` : '';
-  addLabel(g, `${a.side === 'red' ? '楚' : '宋'} ${a.units}${st}${ex}`, `tok ${a.side}${ghost ? ' ghost' : ''}`, 0.85);
-  g.userData = { army: a, ghost };
-  return g;
-}
-function setTokens(list) {
-  // list: [{army, ghost}]
-  const byNode = {};
-  for (const t of list) (byNode[t.army.node] ||= []).push(t);
-  const keep = new Set();
-  for (const [node, arr] of Object.entries(byNode)) {
-    arr.forEach((t, i) => {
-      const key = (t.ghost ? 'g' : 'a') + t.army.id;
-      keep.add(key);
-      const off = arr.length > 1 ? new THREE.Vector3(Math.cos(i * 2.4) * 0.3, 0, Math.sin(i * 2.4) * 0.3) : new THREE.Vector3();
-      const target = pos(node).add(off);
-      const sig = JSON.stringify([t.army.units, t.army.state, t.army.turn, t.ghost]);
-      let rec = tokens.get(key);
-      if (rec && rec.sig !== sig) { tokenLayer.remove(rec.group); disposeLabels(rec.group); const p = rec.group.position.clone(); rec = null; tokens.delete(key); const g = makeToken(t.army, t.ghost); g.position.copy(p); tokenLayer.add(g); tokens.set(key, { group: g, target, sig }); return; }
-      if (!rec) { const g = makeToken(t.army, t.ghost); g.position.copy(target); tokenLayer.add(g); tokens.set(key, { group: g, target, sig }); }
-      else rec.target = target;
-    });
-  }
-  for (const [k, rec] of tokens) if (!keep.has(k)) { tokenLayer.remove(rec.group); disposeLabels(rec.group); tokens.delete(k); }
-}
-function disposeLabels(g) { g.traverse(o => { if (o.isCSS2DObject) o.element.remove(); }); }
-
-// 命令箭頭、可選目標
-const arrowLayer = new THREE.Group(); scene.add(arrowLayer);
-function drawArrows(items) { // [{from,to,side,strike}]
-  arrowLayer.children.slice().forEach(o => { disposeLabels(o); arrowLayer.remove(o); });
+// 命令箭頭（沿地面起伏）
+const arrowLayer = new THREE.Group(); SCN.scene.add(arrowLayer);
+function drawArrows(items) {
+  arrowLayer.children.slice().forEach(o => { arrowLayer.remove(o); o.traverse(m => { m.geometry?.dispose(); m.material?.dispose(); }); });
   for (const it of items) {
-    const a = pos(it.from), b = pos(it.to);
-    const dir = b.clone().sub(a); const len = dir.length(); dir.normalize();
-    const col = it.strike ? '#ff8a00' : COLORS[it.side];
-    const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, Math.max(len - 0.45, 0.05)), new THREE.MeshBasicMaterial({ color: col }));
-    const head = new THREE.Mesh(new THREE.ConeGeometry(0.1, 0.22, 16), new THREE.MeshBasicMaterial({ color: col }));
-    const grp = new THREE.Group();
-    shaft.rotation.z = -Math.PI / 2; shaft.position.x = 0.2 + (len - 0.45) / 2; grp.add(shaft);
-    head.rotation.z = -Math.PI / 2; head.position.x = len - 0.22; grp.add(head);
-    grp.position.copy(a); grp.position.y = 0.32;
-    grp.rotation.y = -Math.atan2(dir.z, dir.x);
-    if (it.text) addLabel(grp, esc(it.text), 'lbl', 0.15).position.x = len / 2;
-    arrowLayer.add(grp);
+    const A = wp(it.from), B = wp(it.to);
+    const dir = B.clone().sub(A); dir.y = 0; const len = dir.length(); dir.normalize();
+    const pts = [];
+    for (let i = 0; i <= 24; i++) {
+      const t = i / 24, d = 4 + (len - 9) * t;
+      const x = A.x + dir.x * d, z = A.z + dir.z * d;
+      pts.push(new THREE.Vector3(x, Math.max(SCN.H(x, z), 0.05) + 1.4 + Math.sin(t * Math.PI) * 2.5, z));
+    }
+    const col = it.strike ? '#ff7a00' : COLORS[it.side];
+    const mat = new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.92, depthTest: false });
+    const g = new THREE.Group();
+    const tube = new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 40, 0.45, 6), mat); tube.renderOrder = 9; g.add(tube);
+    const head = new THREE.Mesh(new THREE.ConeGeometry(1.4, 3.4, 12), mat.clone()); head.renderOrder = 9;
+    const end = pts[pts.length - 1], prev = pts[pts.length - 3];
+    head.position.copy(end); head.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), end.clone().sub(prev).normalize()); g.add(head);
+    arrowLayer.add(g);
   }
-}
-const pickLayer = new THREE.Group(); scene.add(pickLayer);
-function drawTargets(opts) { // [{node, order}]
-  pickLayer.clear();
-  for (const o of opts) {
-    const m = new THREE.Mesh(new THREE.RingGeometry(0.24, 0.36, 40), new THREE.MeshBasicMaterial({ color: o.order.type === 'strike' ? '#ff8a00' : '#ffd84a', transparent: true, opacity: 0.9, side: THREE.DoubleSide }));
-    m.rotation.x = -Math.PI / 2; m.position.copy(pos(o.node)); m.position.y = 0.03;
-    m.userData = o; pickLayer.add(m);
-  }
+  SCN.dirty();
 }
 
-// 點選
-const ray = new THREE.Raycaster(); const ndc = new THREE.Vector2();
-let downAt = null;
-renderer.domElement.addEventListener('pointerdown', e => { downAt = [e.clientX, e.clientY]; });
-renderer.domElement.addEventListener('pointerup', e => {
-  if (!downAt || Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) > 8) return;
-  const r = renderer.domElement.getBoundingClientRect();
-  ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
-  ray.setFromCamera(ndc, camera);
-  const hitT = ray.intersectObjects(pickLayer.children)[0];
-  if (hitT) return onPickTarget?.(hitT.object.userData);
-  const hitA = ray.intersectObjects(tokenLayer.children, true)[0];
-  if (hitA) { let o = hitA.object; while (o.parent && o.parent !== tokenLayer) o = o.parent; return onPickArmy?.(o.userData); }
-  onPickNone?.();
-});
-let onPickTarget, onPickArmy, onPickNone;
+// 點位圈：黃＝本軍所在、綠＝可前往、紅＝出擊目標；白＝其他點位
+let showAllNodes = true;
+function drawMarkers(map) { SCN.setMarkers(map, showAllNodes); }
 
+// 點選地圖上的點位
+let onNodeTap = null;
+SCN.onNodeClick = n => onNodeTap?.(n);
+
+// 版面：地圖只佔面板以外的區域
 const SIDE_MQ = matchMedia('(orientation: landscape) and (max-height: 520px)');
 function resize() {
   const p = document.getElementById('panel');
-  host.style.bottom = host.style.right = '0px';
-  if (p) { if (SIDE_MQ.matches) host.style.right = p.offsetWidth + 'px'; else host.style.bottom = p.offsetHeight + 'px'; }
-  const w = host.clientWidth, h = host.clientHeight;
-  renderer.setSize(w, h); labelR.setSize(w, h);
-  camera.aspect = w / h; camera.updateProjectionMatrix();
+  let w = innerWidth, h = innerHeight;
+  if (p) { if (SIDE_MQ.matches) w -= p.offsetWidth; else h -= p.offsetHeight; }
+  canvas.style.width = w + 'px'; canvas.style.height = h + 'px';
+  SCN.resize();
 }
-addEventListener('resize', resize); resize(); resetCamera(true);
+addEventListener('resize', resize);
 new ResizeObserver(() => resize()).observe(document.body);
-const clock = new THREE.Clock();
-renderer.setAnimationLoop(() => {
-  const t = clock.getElapsedTime(), dt = Math.min(clock.getDelta(), 0.05);
-  for (const rec of tokens.values()) rec.group.position.lerp(rec.target, 0.08);
-  if (fly) {
-    controls.target.lerp(fly.t, 0.12);
-    const want = fly.t.clone().addScaledVector(VIEW_DIR, fly.d);
-    camera.position.lerp(want, 0.12);
-    if (camera.position.distanceTo(want) < 0.01) fly = null;
-  }
-  pickLayer.children.forEach(m => m.scale.setScalar(1 + 0.12 * Math.sin(t * 5)));
-  controls.update(); renderer.render(scene, camera); labelR.render(scene, camera);
-});
+let sty = 'B'; try { sty = localStorage.getItem('hong-style') || 'B'; } catch (e) { }
+SCN.start(); if (sty === 'D') SCN.applyStyle('D');
+resize(); resetCamera(true);
+document.getElementById('loading')?.remove();
+
+// 交戰處冒出「接戰」字樣
+function battleBursts(lines) {
+  for (const t of lines) { const m = t.match(/^【(.+)之戰】/); if (!m) continue; const id = NODE_IDS.find(k => R.NODES[k].name === m[1]); if (id) SCN.battleFx(id, m[1] + '接戰'); }
+}
 
 // ====================== 共用介面 ======================
 function topBar(extra = '') {
   $('#top').innerHTML = `<span class="side ${role === 'red' || role === 'blue' ? role : 'ref'}">${SIDE_NAME[role]}</span>
     <span class="room">房號 <b>${esc(room)}</b></span><span class="grow"></span>${extra}
-    <button id="cam">全圖</button>`;
+    <button id="sty">換畫風</button><button id="cam">全圖</button>`;
   $('#cam').onclick = () => resetCamera();
+  $('#sty').onclick = () => { const k = document.body.dataset.style === 'B' ? 'D' : 'B'; SCN.applyStyle(k); try { localStorage.setItem('hong-style', k); } catch (e) { } };
 }
 function modal(html, onClose) {
   const m = document.createElement('div'); m.className = 'modal';
@@ -341,7 +179,7 @@ if (be.mode === 'local') document.body.insertAdjacentHTML('beforeend', `<div id=
 if (role === 'red' || role === 'blue') {
   const side = role;
   document.body.classList.add(side);
-  drawNodes(side);
+
   topBar('<button id="logb">戰報</button><button id="helpb">規則</button><button id="mineb">我軍</button>');
   $('#ui').innerHTML = '<div id="panel"><div class="muted">連線中…</div></div>';
   let view = null, draft = {}, sel = null, submitted = null, lastTurn = null;
@@ -376,23 +214,34 @@ if (role === 'red' || role === 'blue') {
     if (ended) modal(`<h2>${esc(v.result)}</h2><p class="muted">地圖上已顯示敵軍全部位置。</p>${logHtml(v.log, (prevTurn ?? v.turn))}`);
     else if (newTurn) {
       const rep = v.log.filter(l => l.turn === prevTurn);
+      if (rep.length) battleBursts(rep[0].lines);
       if (rep.length && !(rep[0].lines.length === 1 && rep[0].lines[0] === '雙方未接觸。')) modal(`<h2>第 ${prevTurn} 回合戰報</h2>${logHtml(rep)}`);
     }
   });
   be.on(`orders/${side}`, v => { v = parse(v); submitted = v && view && v.turn === view.turn ? v : (v && !view ? v : null); render(); });
 
   const focusSel = () => { const a = view.mine.find(x => x.id === sel); if (a) focusNodes([a.node, ...Object.keys(R.ADJ[side][a.node] || {})]); };
-  onPickArmy = ud => { if (!ud.ghost && ud.army.side === side && view?.status === 'playing') { sel = ud.army.id; render(); focusSel(); } };
-  onPickTarget = ud => { const a = view.mine.find(x => x.id === sel); draft[sel] = { ...ud.order, count: draft[sel]?.count && draft[sel].type === ud.order.type ? draft[sel].count : a.units }; render(); };
-  onPickNone = () => { sel = null; render(); };
-
+  onNodeTap = n => {
+    if (!view || view.status !== 'playing') return;
+    const sa = view.mine.find(x => x.id === sel);
+    const o = sa && R.legalOrders(null, sa).find(x => x.to === n);
+    if (o) { draft[sel] = { ...o, count: draft[sel]?.count && draft[sel].type === o.type ? draft[sel].count : sa.units }; render(); return; }
+    const mine = view.mine.find(x => x.node === n);
+    if (mine) { sel = mine.id; render(); focusSel(); return; }
+    sel = null; render();
+  };
   function render() {
     if (!view) return;
     const sub = submitted && submitted.turn === view.turn;
     setTokens([...view.mine.map(a => ({ army: a })), ...view.enemies.map(a => ({ army: a })), ...view.ghosts.map(a => ({ army: { ...a, side: side === 'red' ? 'blue' : 'red' }, ghost: true }))]);
     const sa = view.mine.find(a => a.id === sel);
     drawArrows(view.mine.filter(a => draft[a.id] && draft[a.id].to).map(a => ({ from: a.node, to: draft[a.id].to, side, strike: draft[a.id].type === 'strike' })));
-    drawTargets(sa && view.status === 'playing' ? R.legalOrders(null, sa).filter(o => o.to).map(o => ({ node: o.to, order: o })) : []);
+    const mk = {};
+    if (view.status === 'playing') {
+      for (const a of view.mine) mk[a.node] = 'here';
+      if (sa) for (const o of R.legalOrders(null, sa)) if (o.to) mk[o.to] = o.type === 'strike' ? 'attack' : 'move';
+    }
+    drawMarkers(mk);
     const lost = view.lost[side];
     const lim = Math.ceil(view.cfg.redUnits / 2);
     let h = `<div class="phead"><b>第 ${view.turn} 回合</b><span class="muted">已損 ${lost}${side === 'red' ? `／損 ${lim} 即敗` : ''}</span></div>`;
@@ -440,7 +289,7 @@ if (role === 'red' || role === 'blue') {
 
 // ====================== 裁判 ======================
 if (role === 'ref') {
-  drawNodes(null);
+
   topBar('<button id="hide">收合面板</button>');
   $('#ui').innerHTML = '<div id="refbox"></div>';
   let game = null, ord = { red: null, blue: null }, hist = [], showQR = true;
@@ -473,6 +322,7 @@ if (role === 'ref') {
   function render() {
     if (!game) return;
     setTokens(game.armies.map(a => ({ army: a })));
+    drawMarkers({});
     const cur = s => ord[s] && ord[s].turn === game.turn ? ord[s] : null;
     const arrows = [];
     for (const s of ['red', 'blue']) {
@@ -534,7 +384,7 @@ if (role === 'ref') {
 
 // ====================== 投影畫面 ======================
 if (role === 'screen') {
-  drawNodes(null);
+
   topBar('');
   $('#ui').innerHTML = '<div id="screenbox"></div>';
   let pub = null, ord = { red: null, blue: null };
@@ -544,6 +394,7 @@ if (role === 'screen') {
   function render() {
     if (!pub) { $('#screenbox').innerHTML = '<div class="muted">等待開局…</div>'; return; }
     setTokens(pub.armies.map(a => ({ army: a })));
+    drawMarkers({});
     const ok = s => ord[s] && ord[s].turn === pub.turn;
     let h = pub.status === 'playing'
       ? `<div class="big">第 ${pub.turn} 回合</div><div class="stat"><span class="${ok('red') ? 'ok' : ''}">楚軍${ok('red') ? '已下令' : '思考中'}</span><span class="${ok('blue') ? 'ok' : ''}">宋軍${ok('blue') ? '已下令' : '思考中'}</span></div>

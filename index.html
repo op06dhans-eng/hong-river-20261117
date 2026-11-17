@@ -12,7 +12,9 @@
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
   html,body{margin:0;height:100%;overflow:hidden;background:#1d1a15;color:var(--ink);
     font-family:"Noto Serif TC","Source Han Serif TC","PingFang TC","Microsoft JhengHei",serif}
-  #scene{position:fixed;inset:0}
+  #c{position:fixed;left:0;top:0;width:100%;height:100%;display:block;touch-action:none}
+  #labels{position:fixed;inset:0;pointer-events:none;overflow:hidden}
+  #loading{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;color:#ddd;font-size:16px;background:#111;z-index:50}
   .lbl{font-size:12px;padding:1px 6px;border-radius:8px;background:rgba(244,236,216,.86);color:var(--ink);
     border:1px solid rgba(80,60,30,.35);white-space:nowrap;pointer-events:none;transform:translateY(14px)}
   .lbl.river{background:rgba(214,232,246,.9)}
@@ -33,7 +35,6 @@
     background:rgba(244,236,216,.92);color:var(--ink)}
 
   /* 底部面板 */
-  #scene{bottom:0;right:0}
   #panel{position:fixed;left:0;right:0;bottom:0;max-height:42vh;overflow:auto;background:var(--paper);
     border-top:3px solid var(--gold);padding:8px 10px calc(10px + env(safe-area-inset-bottom));z-index:5;box-shadow:0 -4px 16px rgba(0,0,0,.35)}
   .phead{display:flex;justify-content:space-between;align-items:baseline;font-size:15px;margin-bottom:6px}
@@ -105,17 +106,17 @@
     color:var(--paper);background:radial-gradient(#3a2f22,#16120d);text-align:center}
   #cover .t{font-size:44px;font-weight:700;letter-spacing:.2em}
 </style>
-<script type="importmap">
-{ "imports": {
-  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
-  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
-} }
-</script>
+
+<link rel="stylesheet" href="world.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="config.js"></script>
+<script src="world.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
 </head>
 <body>
-<div id="scene"></div>
+<canvas id="c"></canvas>
+<div id="labels"></div>
+<div id="loading">正在鋪設地形……</div>
 <div id="top"></div>
 <div id="ui"></div>
 <script type="module" src="app.js"></script>
