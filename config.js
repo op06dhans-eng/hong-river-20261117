@@ -1,4 +1,11 @@
-// 把 Firebase 專案設定貼在這裡（Firebase 主控台 → 專案設定 → 您的應用程式 → SDK 設定）
-// 一定要有 databaseURL（即時資料庫網址）。
-// 保持 null 時，遊戲會以「單機測試模式」執行：同一台電腦、同一個瀏覽器開多個分頁就能互相同步。
-window.FIREBASE_CONFIG = null;
+// Firebase 專案設定（drone-swarm-class，資料存在 hong/ 路徑下）
+// 改回 null 即為單機測試模式。
+window.FIREBASE_CONFIG = {
+  apiKey: "AIzaSyCtxZmkrZ8tcCONC5DQbEU5ySlos9i-a8o",
+  authDomain: "drone-swarm-class.firebaseapp.com",
+  databaseURL: "https://drone-swarm-class-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "drone-swarm-class",
+  storageBucket: "drone-swarm-class.firebasestorage.app",
+  messagingSenderId: "528664638395",
+  appId: "1:528664638395:web:e478a9b393bbfe4b85ca9e"
+};
