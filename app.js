@@ -4,7 +4,7 @@ const $ = s => document.querySelector(s);
 const params = new URLSearchParams(location.search);
 let role = params.get('role');            // red | blue | ref | screen
 let room = (params.get('room') || '').toUpperCase();
-const SIDE_NAME = { red: '楚軍（紅）', blue: '宋軍（藍）', ref: '裁判', screen: '投影' };
+const SIDE_NAME = { red: '紅軍', blue: '藍軍', ref: '裁判', screen: '投影' };
 const ROLE_SIDE = { red: 'red', blue: 'blue' };
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
@@ -41,11 +41,11 @@ if (!role || (!room && role !== 'ref')) {
   document.getElementById('loading')?.remove();
   document.body.insertAdjacentHTML('beforeend', `
   <div id="home"><div class="card">
-    <h1>泓水之戰</h1><div class="muted">雙盲推演．楚軍渡河，宋軍守國</div>
+    <h1>無名之戰</h1><div class="muted">雙盲推演．紅軍渡河，藍軍守國</div>
     <p style="margin-top:16px">學生請掃描老師畫面上的 QR 碼。或輸入房號：</p>
     <input id="hroom" placeholder="房號（四碼）" maxlength="6">
-    <div class="row"><button class="btn" id="hr" style="flex:1;background:var(--red);color:#fff">加入楚軍（紅）</button>
-    <button class="btn" id="hb" style="flex:1;background:var(--blue);color:#fff">加入宋軍（藍）</button></div>
+    <div class="row"><button class="btn" id="hr" style="flex:1;background:var(--red);color:#fff">加入紅軍</button>
+    <button class="btn" id="hb" style="flex:1;background:var(--blue);color:#fff">加入藍軍</button></div>
     <hr style="border:none;border-top:1px solid var(--line);margin:16px 0">
     <button class="btn main" id="hk">我是老師：開一局新推演</button>
   </div></div>`);
@@ -69,7 +69,7 @@ const canvas = SCN.canvas;
 const NODE_IDS = Object.keys(R.NODES);
 const wp = id => { const n = RULES.NODES[id]; return new THREE.Vector3(n.x, Math.max(SCN.H(n.x, n.z), 0.05), n.z); };
 
-// 鏡頭：紅軍從南往北看，宋軍從北往南看
+// 鏡頭：紅軍從南往北看，藍軍從北往南看
 const TH = VIEW_SIDE === 'blue' ? Math.PI : 0;
 function focusNodes(ids, instant) {
   if (!ids.length) return;
@@ -82,13 +82,26 @@ function focusNodes(ids, instant) {
 }
 function resetCamera(instant) { SCN.flyOrbit({ target: new THREE.Vector3(0, 0, -2), r: canvas.clientWidth < canvas.clientHeight ? 230 : 160, th: TH, ph: 0.82 }, instant); }
 
-// 部隊：沿用原遊戲的立體士兵（每個兵力單位畫 12 人）
+// 部隊：步卒與戰車模型移植自《陣法立體版》。每個兵力單位畫 12 名步卒，每支部隊前面一乘將車（只是圖示，規則上全是步兵）
+const PER_UNIT = 12;
+function infOffs(n, disorder) {
+  const cols = Math.min(12, n), out = [];
+  for (let i = 0; i < n; i++) {
+    const r = Math.floor(i / cols), inRow = Math.min(cols, n - r * cols), c = i % cols;
+    const j = disorder ? 0.55 : 0.08, h = (k) => { const v = Math.sin(i * 12.9898 + k * 78.233) * 43758.5453; return (v - Math.floor(v) - .5) * 2 * j; };
+    out.push([(c - (inRow - 1) / 2) * 0.72 + h(1), -1.6 - r * 0.85 + h(2)]);
+  }
+  return out;
+}
 function setTokens(list, animate = true) {
   SCN.setUnits(list.map(t => {
-    const a = t.army, ch = a.side === 'red' ? '楚' : '宋';
+    const a = t.army, ch = a.side === 'red' ? '紅' : '藍';
     const st = a.side === 'red' && a.state && a.state !== 'formed' ? ' ' + R.STATE_LABEL[a.state] : '';
     const label = t.ghost ? `${ch} ${a.units}？ 第${a.turn}回合目擊` : `${ch} ${a.units}${st}`;
-    return { key: (t.ghost ? 'g' : 'a') + a.id, side: a.side, type: 'inf', s: a.units, pos: { n: a.node }, label, labelCls: t.ghost ? 'ghost' : '', ghost: !!t.ghost, mine: a.side === VIEW_SIDE };
+    const disorder = a.side === 'red' && a.state && a.state !== 'formed';
+    return { key: (t.ghost ? 'g' : 'a') + a.id, side: a.side, type: 'zinf_' + a.side, s: a.units * 100 + (disorder ? 1 : 0), pos: { n: a.node },
+      offs: infOffs(a.units * PER_UNIT, disorder), extra: { type: 'zchr_' + a.side, offs: [[0, 1.4]] },
+      label, labelCls: t.ghost ? 'ghost' : '', ghost: !!t.ghost, mine: a.side === VIEW_SIDE };
   }), animate);
 }
 
@@ -213,6 +226,16 @@ function modal(html, onClose) {
   m.querySelector('.btn.main').onclick = () => { m.remove(); onClose?.(); };
   document.body.appendChild(m);
 }
+function toast(t) {
+  let d = document.getElementById('toast'); if (!d) { d = document.createElement('div'); d.id = 'toast'; document.body.appendChild(d); }
+  d.textContent = t; d.style.display = 'block'; clearTimeout(toast._t); toast._t = setTimeout(() => d.style.display = 'none', 1800);
+}
+// 推演結束才揭曉是哪一場戰役
+const REVEAL = `<div class="reveal"><h2>揭曉：這是泓之戰</h2>
+  <p>西元前 638 年（魯僖公二十二年），楚國伐宋以救鄭，宋襄公迎戰於泓水。<b>紅軍是楚，藍軍是宋，藍軍國君就是宋襄公。</b></p>
+  <p class="yw">「宋人既成列，楚人未既濟。司馬曰：『彼眾我寡，及其未既濟也，請擊之。』公曰：『不可。』既濟而未成列，又以告。公曰：『未可。』既陳而後擊之，宋師敗績。」（《左傳・僖公二十二年》）</p>
+  <p class="muted">白話：宋軍已經列好陣，楚軍還沒渡完河。司馬子魚說：「敵眾我寡，趁他們還沒渡完，請下令攻擊。」襄公說：「不行。」楚軍渡完河還沒列陣，子魚又請戰，襄公說：「還不行。」等楚軍列好陣才進攻，宋軍大敗。</p>
+  <p>想一想：剛才你們的藍軍，在哪一刻出手？和宋襄公的選擇一樣嗎？</p></div>`;
 function logHtml(log, fromTurn = 0) {
   return log.filter(l => l.turn >= fromTurn).map(l => `<div class="log-turn">第 ${l.turn} 回合</div>${l.lines.map(x => `<p>${esc(x)}</p>`).join('')}`).join('') || '<p class="muted">尚無紀錄。</p>';
 }
@@ -240,18 +263,20 @@ if (role === 'red' || role === 'blue') {
   const focusMine = instant => view && focusNodes(view.mine.flatMap(a => [a.node, ...Object.keys(R.ADJ[side][a.node] || {})]), instant);
   $('#mineb').onclick = () => focusMine();
   $('#logb').onclick = () => view && modal(`<h2>戰報</h2>${logHtml(view.log)}`);
-  $('#helpb').onclick = () => modal(side === 'red' ? `<h2>楚軍須知</h2>
-    <p>你率楚軍 6 個步兵單位自南方來，必須渡過南河，攻入宋營即勝。</p>
+  const showHelp = () => modal(side === 'red' ? `<h2>紅軍須知</h2>
+    <p>你率紅軍 6 個步兵單位自南方來，必須渡過南河，攻入藍軍本陣即勝。</p>
     <p>• 每回合每支部隊可移動一格，也可以分兵走不同路線。</p>
     <p>• 站在河中（渡口）時戰力只剩一半；上岸後也只有一半，要按「重新列陣」停一回合才恢復。</p>
-    <p>• 只看得到同一條路線上相距兩格以內的宋軍。</p>
-    <p>• 折損 3 個單位即敗；12 回合內未能攻入宋營也算敗。</p>` : `<h2>宋軍須知</h2>
-    <p>你率宋軍 3 個步兵單位守國都，敵眾我寡。</p>
+    <p>• 只看得到同一條路線上相距兩格以內的藍軍。</p>
+    <p>• 折損 3 個單位即敗；12 回合內未能攻入藍軍本陣也算敗。</p>` : `<h2>藍軍須知</h2>
+    <p>你率藍軍 3 個步兵單位守國都，敵眾我寡。</p>
     <p>• 每回合每支部隊可移動一格，也可以分兵。只能在北岸行動，不渡河。</p>
-    <p>• 只看得到同一條路線上相距兩格以內的楚軍。</p>
-    <p>• 楚軍在河中或上岸未成列時，戰力只剩一半，而你打擊這種敵人戰力 ×1.5。站在河岸點可以「出擊」對岸渡口。</p>
-    <p>• 楚軍列好陣後與你正面交戰，你幾乎必敗。</p>
-    <p>• 讓楚軍折損 3 個單位，或守住 12 回合，即勝。</p>`);
+    <p>• 只看得到同一條路線上相距兩格以內的紅軍。</p>
+    <p>• 紅軍在河中或上岸未成列時，戰力只剩一半，而你打擊這種敵人戰力 ×1.5。站在河岸點可以「出擊」對岸渡口。</p>
+    <p>• 紅軍列好陣後與你正面交戰，你幾乎必敗。</p>
+    <p>• 讓紅軍折損 3 個單位，或守住 12 回合，即勝。</p>`);
+  $('#helpb').onclick = showHelp;
+  try { if (!localStorage.getItem('hong-help-' + side)) { localStorage.setItem('hong-help-' + side, '1'); setTimeout(showHelp, 400); } } catch (e) { }
 
   be.on(`view/${side}`, v => {
     v = parse(v);
@@ -264,7 +289,7 @@ if (role === 'red' || role === 'blue') {
     view = v; lastTurn = v.turn;
     render();
     if (first || newTurn) focusMine(first);
-    if (ended) modal(`<h2>${esc(v.result)}</h2><p class="muted">地圖上已顯示敵軍全部位置。</p>${logHtml(v.log, (prevTurn ?? v.turn))}`);
+    if (ended) modal(`<h2>${esc(v.result)}</h2><p class="muted">地圖上已顯示敵軍全部位置。</p>${logHtml(v.log, (prevTurn ?? v.turn))}${REVEAL}`);
     else if (newTurn) {
       const rep = v.log.filter(l => l.turn === prevTurn);
       if (rep.length) battleBursts(rep[0].lines);
@@ -336,7 +361,7 @@ if (role === 'red' || role === 'blue') {
       const clean = {};
       for (const [k, o] of Object.entries(draft)) if (o) clean[k] = { type: o.type, ...(o.to ? { to: o.to } : {}), ...(o.count ? { count: o.count } : {}) };
       await be.set(`orders/${side}`, JSON.stringify({ turn: view.turn, orders: clean, at: Date.now() }));
-      sel = null; render();
+      sel = null; render(); toast('✓ 命令已送出');
     };
   }
 }
@@ -396,19 +421,19 @@ if (role === 'ref') {
     };
     const both = cur('red') && cur('blue');
     let h = '';
-    h += `<div class="row" style="justify-content:space-between"><b style="font-size:18px">第 ${game.turn} 回合</b><span class="muted">楚損 ${game.lost.red}／宋損 ${game.lost.blue}</span></div>`;
-    if (game.status !== 'playing') h += `<p style="font-weight:700;color:var(--red)">${esc(game.result)}</p>`;
+    h += `<div class="row" style="justify-content:space-between"><b style="font-size:18px">第 ${game.turn} 回合</b><span class="muted">紅損 ${game.lost.red}／藍損 ${game.lost.blue}</span></div>`;
+    if (game.status !== 'playing') h += `<p style="font-weight:700;color:var(--red)">${esc(game.result)}</p>${REVEAL}`;
     h += `<h4>學生入口 <button class="btn" id="qrt" style="padding:2px 8px;font-size:12px">${showQR ? '隱藏' : '顯示'}</button></h4>`;
-    if (showQR) h += `<div class="qrs"><div>${qr(link('red'))}<br><b style="color:var(--red)">楚軍（紅）</b></div><div>${qr(link('blue'))}<br><b style="color:var(--blue)">宋軍（藍）</b></div><div>${qr(link('screen'))}<br><b>投影畫面</b></div></div>
+    if (showQR) h += `<div class="qrs"><div>${qr(link('red'))}<br><b style="color:var(--red)">紅軍</b></div><div>${qr(link('blue'))}<br><b style="color:var(--blue)">藍軍</b></div><div>${qr(link('screen'))}<br><b>投影畫面</b></div></div>
       <div class="muted" style="word-break:break-all;margin-top:4px">房號 ${esc(room)}</div>`;
-    h += `<div class="stat"><span class="${cur('red') ? 'ok' : ''}">楚軍${cur('red') ? '已下令' : '未下令'}</span><span class="${cur('blue') ? 'ok' : ''}">宋軍${cur('blue') ? '已下令' : '未下令'}</span></div>`;
-    h += `<h4 style="color:var(--red)">楚軍命令</h4>${ordList('red')}<h4 style="color:var(--blue)">宋軍命令</h4>${ordList('blue')}`;
+    h += `<div class="stat"><span class="${cur('red') ? 'ok' : ''}">紅軍${cur('red') ? '已下令' : '未下令'}</span><span class="${cur('blue') ? 'ok' : ''}">藍軍${cur('blue') ? '已下令' : '未下令'}</span></div>`;
+    h += `<h4 style="color:var(--red)">紅軍命令</h4>${ordList('red')}<h4 style="color:var(--blue)">藍軍命令</h4>${ordList('blue')}`;
     if (game.status === 'playing') h += `<button class="btn main" id="res">${both ? '結算本回合' : '結算本回合（未下令者原地固守）'}</button>
       <label class="auto"><input type="checkbox" id="autoR" ${autoRes ? 'checked' : ''}> 雙方都送出命令後，3 秒自動結算</label>`;
     h += `<div class="row" style="margin-top:8px"><button class="btn" id="undo" ${hist.length ? '' : 'disabled'}>回上一回合</button><button class="btn" id="new">重新開局</button><button class="btn" id="lg">完整戰報</button></div>`;
     h += `<details style="margin-top:8px"><summary>參數設定（重新開局時套用）</summary>
-      <div class="count">楚軍兵力 <input id="sRed" type="number" value="${game.cfg.redUnits}" min="2" max="12" style="width:60px"></div>
-      <div class="count">宋軍兵力 <input id="sBlue" type="number" value="${game.cfg.blueUnits}" min="1" max="9" style="width:60px"></div>
+      <div class="count">紅軍兵力 <input id="sRed" type="number" value="${game.cfg.redUnits}" min="2" max="12" style="width:60px"></div>
+      <div class="count">藍軍兵力 <input id="sBlue" type="number" value="${game.cfg.blueUnits}" min="1" max="9" style="width:60px"></div>
       <div class="count">回合上限 <input id="sMax" type="number" value="${game.cfg.maxTurns}" min="4" max="30" style="width:60px"></div>
       <div class="count">擊其不整加成 <input id="sBonus" type="number" step="0.25" value="${game.cfg.strikeBonus}" min="1" max="3" style="width:70px"></div>
       <div class="count">發現距離 <input id="sSight" type="number" value="${game.cfg.sightRange}" min="1" max="4" style="width:60px"> 格</div></details>`;
@@ -458,9 +483,9 @@ if (role === 'screen') {
     drawMarkers({});
     const ok = s => ord[s] && ord[s].turn === pub.turn;
     let h = pub.status === 'playing'
-      ? `<div class="big">第 ${pub.turn} 回合</div><div class="stat"><span class="${ok('red') ? 'ok' : ''}">楚軍${ok('red') ? '已下令' : '思考中'}</span><span class="${ok('blue') ? 'ok' : ''}">宋軍${ok('blue') ? '已下令' : '思考中'}</span></div>
+      ? `<div class="big">第 ${pub.turn} 回合</div><div class="stat"><span class="${ok('red') ? 'ok' : ''}">紅軍${ok('red') ? '已下令' : '思考中'}</span><span class="${ok('blue') ? 'ok' : ''}">藍軍${ok('blue') ? '已下令' : '思考中'}</span></div>
          <div class="muted">戰場上的兵力只在各隊手機上顯示。</div>`
-      : `<div class="big">${esc(pub.result)}</div><div class="muted">雙方全部部隊已揭曉。</div>`;
+      : `<div class="big">${esc(pub.result)}</div><div class="muted">雙方全部部隊已揭曉。</div>${REVEAL}`;
     const last = pub.log.at(-1);
     if (last) h += logHtml(pub.status === 'playing' ? [last] : pub.log);
     $('#screenbox').innerHTML = h;

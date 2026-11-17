@@ -1,8 +1,8 @@
-// 泓水之戰．雙盲推演 —— 規則引擎（純邏輯，不含畫面）
+// 無名之戰．雙盲推演 —— 規則引擎（純邏輯，不含畫面）
 // 座標為地圖圖片上的像素位置（1920 × 1080）
 
 export const NODES = {
-  S:  { name: '楚營',       x: 600, y: 882, side: 'red',  kind: 'camp' },
+  S:  { name: '紅軍營地',       x: 600, y: 882, side: 'red',  kind: 'camp' },
   W1: { name: '南岸小徑',   x: 292, y: 738, side: 'red'  },
   W2: { name: '上游淺灘',   x: 325, y: 472, side: 'red',  kind: 'river' },
   W3: { name: '北岸西丘',   x: 382, y: 376, side: 'both', kind: 'bank' },
@@ -17,7 +17,7 @@ export const NODES = {
   E3: { name: '下游北岸',   x: 1530, y: 582, side: 'both', kind: 'bank' },
   E4: { name: '東路',       x: 1445, y: 415, side: 'blue' },
   E5: { name: '東路口',     x: 1335, y: 278, side: 'red'  },
-  H:  { name: '宋營',       x: 1160, y: 238, side: 'blue', kind: 'camp' },
+  H:  { name: '藍軍本陣',       x: 1160, y: 238, side: 'blue', kind: 'camp' },
 };
 
 // 三條路線（依地理順序列出所有點，用來算距離與「經過」）
@@ -197,8 +197,8 @@ function contactNode(r, b) {
   if (b.order.type === 'strike') {
     const ford = bp[1];
     if (r.end === ford) return ford;                 // 正在渡河（進入或停在河中）
-    if (rp.includes(bp[0])) return bp[0];           // 上岸撞上出擊的宋軍
-    return null;                                    // 楚軍退回南岸，脫離接觸
+    if (rp.includes(bp[0])) return bp[0];           // 上岸撞上出擊的藍軍
+    return null;                                    // 紅軍退回南岸，脫離接觸
   }
   // 一般情形：路徑有共同點
   const shared = rp.filter(n => bp.includes(n));
@@ -241,7 +241,7 @@ function fight(g, node, rs, bs, log) {
   const redState = rs.some(p => p.army.state === 'crossing') ? 'crossing' : redWeak ? 'disordered' : 'formed';
   const redEff = redUnits * (redWeak ? cfg.disorderFactor : 1);
   const blueEff = blueUnits * (redWeak ? cfg.strikeBonus : 1);
-  const head = `【${NODES[node].name}之戰】楚軍 ${redUnits}（${STATE_LABEL[redState]}，戰力 ${fmt(redEff)}）對宋軍 ${blueUnits}（戰力 ${fmt(blueEff)}${redWeak ? '，擊其不整 ×' + cfg.strikeBonus : ''}）。`;
+  const head = `【${NODES[node].name}之戰】紅軍 ${redUnits}（${STATE_LABEL[redState]}，戰力 ${fmt(redEff)}）對藍軍 ${blueUnits}（戰力 ${fmt(blueEff)}${redWeak ? '，擊其不整 ×' + cfg.strikeBonus : ''}）。`;
   log.push(head);
 
   let winner, ratio;
@@ -251,8 +251,8 @@ function fight(g, node, rs, bs, log) {
 
   if (!winner) {
     takeLoss(rs, 1, g, 'red'); takeLoss(bs, 1, g, 'blue');
-    retreat(rs, 'red', node); // 勢均力敵，攻方楚軍退回
-    log.push('勢均力敵，雙方各損 1 個單位，楚軍退回原處。');
+    retreat(rs, 'red', node); // 勢均力敵，攻方紅軍退回
+    log.push('勢均力敵，雙方各損 1 個單位，紅軍退回原處。');
     for (const p of rs) clearRegroup(p.army);
     return;
   }
@@ -335,10 +335,10 @@ function updateSight(g) {
 function checkEnd(g, log) {
   const red = g.armies.filter(a => a.side === 'red');
   const blue = g.armies.filter(a => a.side === 'blue');
-  if (red.some(a => a.node === 'H')) { g.status = 'red_win'; g.result = '楚軍攻入宋營，楚勝。'; }
-  else if (!blue.length) { g.status = 'red_win'; g.result = '宋軍全軍覆沒，楚勝。'; }
-  else if (g.lost.red >= Math.ceil(g.cfg.redUnits / 2)) { g.status = 'blue_win'; g.result = `楚軍折損過半（${g.lost.red}／${g.cfg.redUnits}），宋勝。`; }
-  else if (g.turn >= g.cfg.maxTurns) { g.status = 'blue_win'; g.result = `${g.cfg.maxTurns} 回合內楚軍未能攻入，宋軍守住國都。`; }
+  if (red.some(a => a.node === 'H')) { g.status = 'red_win'; g.result = '紅軍攻入藍軍本陣，紅軍勝。'; }
+  else if (!blue.length) { g.status = 'red_win'; g.result = '藍軍全軍覆沒，紅軍勝。'; }
+  else if (g.lost.red >= Math.ceil(g.cfg.redUnits / 2)) { g.status = 'blue_win'; g.result = `紅軍折損過半（${g.lost.red}／${g.cfg.redUnits}），藍軍勝。`; }
+  else if (g.turn >= g.cfg.maxTurns) { g.status = 'blue_win'; g.result = `${g.cfg.maxTurns} 回合內紅軍未能攻入，藍軍守住國都。`; }
   if (g.status !== 'playing') log.push(g.result);
 }
 
@@ -361,5 +361,5 @@ function relevant(t, g, side) {
   return true;
 }
 
-export function sideName(s) { return s === 'red' ? '楚軍' : '宋軍'; }
+export function sideName(s) { return s === 'red' ? '紅軍' : '藍軍'; }
 function fmt(n) { return Number.isInteger(n) ? String(n) : n.toFixed(1); }

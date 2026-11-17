@@ -670,6 +670,81 @@ const GEO = (() => {
   const chr = [[horses, 'horse'], [hlegs2, 'horseLeg'], [cart, 'trunk'], [wheels, 'trunk'], [crew, 'side'], [heads, 'skin'], [helms, 'iron'], [weapons, 'trunk']];
   return { inf: [[body, 'side'], [torso, 'iron'], [head, 'skin'], [helm, 'iron'], [tas, 'red'], [spear, 'trunk']], cav: [[hbody, 'horse'], [hneck, 'horse'], [hhead, 'horse'], [hlegs, 'horseLeg'], [rider, 'side'], [rhead, 'skin'], [rhelm, 'iron'], [rtas, 'red'], [lance, 'trunk']], chr };
 })();
+
+// ===== 陣法遊戲的步卒與戰車（移植自《陣法立體版》：圓盔紅纓、札甲、肩甲、紅纓長槍、盾；戰車雙馬三人） =====
+(function () {
+  function mc(list) {
+    const pos = [], nor = [], col = [];
+    for (const [g, hex] of list) { const ng = g.index ? g.toNonIndexed() : g; const p = ng.attributes.position.array, n = ng.attributes.normal.array, c = new THREE.Color(hex);
+      for (let i = 0; i < p.length; i++) { pos.push(p[i]); nor.push(n[i]); } for (let i = 0; i < p.length / 3; i++) col.push(c.r, c.g, c.b); }
+    const out = new THREE.BufferGeometry();
+    out.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); out.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3)); out.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+    return out;
+  }
+  const bx = (w, h, d, px, py, pz, rx, ry, rz) => { const g = new THREE.BoxGeometry(w, h, d); if (rx) g.rotateX(rx); if (ry) g.rotateY(ry); if (rz) g.rotateZ(rz); g.translate(px, py, pz); return g; };
+  const TEAM = {
+    red:  { torso: 0x7f3426, arms: 0x6e2a20, legs: 0x2c2420, helm: 0x3a2a24, brim: 0x8e1a10, crest: 0xd23a2b, pauld: 0x5a2a22, chest: 0x9a3a2c, belt: 0x2a1a10, shield: 0x7a2e22, body: 0x8e1a10 },
+    blue: { torso: 0x1d3560, arms: 0x2a4a80, legs: 0x2c2420, helm: 0x2a4a80, brim: 0xd6c8a0, crest: 0xe8c870, pauld: 0x3f6bb0, chest: 0xd6c8a0, belt: 0x2a1a10, shield: 0x2a3f6a, body: 0x1d3560 },
+  };
+  const SKIN = 0xe0b48a, GOLD = 0xcfa64c;
+  // 一名步卒（立正持槍、左手持盾），面向 +z；回傳 [幾何, 顏色] 清單
+  function soldier(T, k, ox, oy, oz) {
+    const L = [];
+    const put = (g, hex, x, y, z) => { g.translate(x, y, z); g.scale(k, k, k); g.translate(ox, oy, oz); L.push([g, hex]); };
+    const leg = () => { const g = new THREE.BoxGeometry(.22, .74, .26); g.translate(0, -.37, 0); return g; };
+    const arm = () => { const g = new THREE.BoxGeometry(.17, .54, .19); g.translate(0, -.27, 0); return g; };
+    put(leg(), T.legs, -.13, .74, 0); put(leg(), T.legs, .13, .74, 0);
+    put(new THREE.BoxGeometry(.56, .62, .34), T.torso, 0, 1.05, 0);
+    put(new THREE.BoxGeometry(.6, .42, .4), T.chest, 0, 1.14, 0);
+    put(new THREE.BoxGeometry(.6, .1, .38), T.belt, 0, .78, 0);
+    put(new THREE.BoxGeometry(.38, .38, .38), SKIN, 0, 1.55, 0);
+    put(new THREE.BoxGeometry(.42, .32, .42), T.helm, 0, 1.82, 0);
+    put(new THREE.BoxGeometry(.40, .2, .1).translate(0, -.22, -.19), T.helm, 0, 1.82, 0);
+    put(new THREE.BoxGeometry(.08, .22, .3).translate(-.21, -.2, -.02), T.helm, 0, 1.82, 0);
+    put(new THREE.BoxGeometry(.08, .22, .3).translate(.21, -.2, -.02), T.helm, 0, 1.82, 0);
+    put(new THREE.BoxGeometry(.5, .06, .5), T.brim, 0, 1.69, 0);
+    put(new THREE.BoxGeometry(.12, .4, .12), T.crest, 0, 2.16, 0);
+    put(new THREE.BoxGeometry(.22, .14, .38), T.pauld, -.37, 1.38, 0); put(new THREE.BoxGeometry(.22, .14, .38), T.pauld, .37, 1.38, 0);
+    put(arm(), T.arms, -.37, 1.32, 0); put(arm(), T.arms, .37, 1.32, 0);
+    // 紅纓長槍（直立握在右手）
+    put(new THREE.BoxGeometry(.06, 2.2, .06).translate(0, .5, 0), 0x4a3020, .44, .74, .1);
+    put(new THREE.BoxGeometry(.1, .32, .05).translate(0, 1.72, 0), 0xdfe3e6, .44, .74, .1);
+    put(new THREE.BoxGeometry(.14, .12, .14).translate(0, 1.52, 0), 0xc8281c, .44, .74, .1);
+    // 盾（左手，略前傾）
+    const sh = (g) => { g.scale(1, 1, 1.6); g.rotateX(-.45); return g; };
+    put(sh(new THREE.BoxGeometry(.95, 1.35, .06)), T.shield, -.3, 1.12, .5);
+    put(sh(new THREE.BoxGeometry(.95, .07, .09).translate(0, .64, .01)), GOLD, -.3, 1.12, .5);
+    put(sh(new THREE.BoxGeometry(.95, .07, .09).translate(0, -.64, .01)), GOLD, -.3, 1.12, .5);
+    put(sh(new THREE.CylinderGeometry(.2, .17, .1, 14).rotateX(Math.PI / 2).translate(0, 0, .07)), 0xd9b65c, -.3, 1.12, .5);
+    return L;
+  }
+  // 一乘戰車：車廂、雙輪（輻條）、兩匹馬、車上三人（御者居中、左右甲士），面向 +z
+  function chariot(T, k) {
+    const L = [];
+    const put = (g, hex) => { g.scale(k, k, k); L.push([g, hex]); };
+    [[bx(1.7, .12, 1.25, 0, .95, 0), 0x5a3a22], [bx(1.7, .55, .08, 0, 1.28, .6), T.body], [bx(.08, .55, 1.25, -.85, 1.28, 0), T.body], [bx(.08, .55, 1.25, .85, 1.28, 0), T.body],
+     [bx(1.7, .07, .1, 0, 1.57, .6), 0xd6a94e], [bx(2.6, .12, .12, 0, .85, 0), 0x3a2618], [bx(.12, .12, 3.4, 0, .95, 2.2), 0x4a3020], [bx(2.2, .1, .12, 0, 1.35, 3.7), 0x4a3020],
+     [bx(.7, .08, .14, -.45, 1.62, 3.75), 0xb8281c], [bx(.7, .08, .14, .45, 1.62, 3.75), 0xb8281c]].forEach(([g, c]) => put(g, c));
+    for (const sx of [-1.2, 1.2]) {
+      put(new THREE.CylinderGeometry(.85, .85, .12, 18).rotateZ(Math.PI / 2).translate(sx, .85, 0), 0x4a3020);
+      put(new THREE.TorusGeometry(.78, .06, 6, 20).rotateY(Math.PI / 2).translate(sx + sx * .03, .85, 0), 0x2a1a10);
+      for (let i = 0; i < 6; i++) put(bx(.06, 1.5, .05, 0, 0, 0, i / 6 * Math.PI).translate(sx + sx * .04, .85, 0), 0x6a4a30);
+    }
+    const hc = 0x6b4a32;
+    for (const hx of [-.45, .45]) {
+      [[bx(.62, .7, 1.7, 0, 1.25, 0), hc], [bx(.34, .8, .38, 0, 1.8, .85, .5), hc], [bx(.3, .32, .62, 0, 2.15, 1.2), hc], [bx(.12, .4, .3, 0, 2.0, .7), 0x2a1d14], [bx(.12, .7, .12, 0, 1.2, -.9, -.5), 0x2a1d14]]
+        .forEach(([g, c]) => put(g.translate(hx, 0, 4.0), c));
+      for (const [lx, lz] of [[.2, .7], [-.2, .7], [.2, -.7], [-.2, -.7]]) { put(bx(.16, .95, .18, 0, -.47, 0).translate(hx + lx, .95, 4.0 + lz), hc); put(bx(.18, .12, .2, 0, -.92, 0).translate(hx + lx, .95, 4.0 + lz), 0x1a1410); }
+    }
+    for (const [cx, cz] of [[-.5, -.2], [0, .15], [.5, -.2]]) for (const p of soldier(T, .85, cx, 1.0 - .74 * .85 + .35, cz)) { p[0].scale(k, k, k); L.push(p); }
+    return L;
+  }
+  const K = 0.5;
+  for (const s of ['red', 'blue']) {
+    GEO['zinf_' + s] = [[mc(soldier(TEAM[s], K, 0, 0, 0)), 'vc']];
+    GEO['zchr_' + s] = [[mc(chariot(TEAM[s], K)), 'vc']];
+  }
+})();
 const _o = new THREE.Object3D();
 function soldierCount(type, s) { const m = window.SOLDIERS_PER || { inf: 6, cav: 3, chr: 1 }; if (type === 'chr') return Math.max(1, Math.round(s * (m.chr || 1))); return type === 'cav' ? Math.max(2, Math.round(s * m.cav)) : Math.max(3, Math.round(s * m.inf)); }
 function formationOffsets(type, n) {
@@ -685,7 +760,9 @@ function colorFor(role, side) {
   return CUR.P[role] || '#888888';
 }
 function unitMat(role, side, ghost) {
-  const c = colorFor(role, side); const o = ghost ? { transparent: true, opacity: .45, depthWrite: false } : {};
+  const o = ghost ? { transparent: true, opacity: .45, depthWrite: false } : {};
+  if (role === 'vc') return CUR.mat === 'holo' ? new THREE.MeshBasicMaterial(Object.assign({ color: side === 'red' ? STY.D.P.red : STY.D.P.blue }, o)) : new THREE.MeshLambertMaterial(Object.assign({ color: '#ffffff', vertexColors: true }, o));
+  const c = colorFor(role, side);
   if (CUR.mat === 'holo') return new THREE.MeshBasicMaterial(Object.assign({ color: c }, o));
   return new THREE.MeshLambertMaterial(Object.assign({ color: c }, o));
 }
@@ -696,12 +773,18 @@ function buildUnit(d) {
   const pole = new THREE.Mesh(new THREE.CylinderGeometry(.05, .05, 3.2, 5), unitMat('trunk', d.side, d.ghost)); pole.userData.role = 'trunk'; g.add(pole);
   const fg = new THREE.PlaneGeometry(1.4, .95, 4, 1); const flag = new THREE.Mesh(fg, unitMat('side', d.side, d.ghost)); flag.material.side = THREE.DoubleSide; flag.userData.role = 'side'; g.add(flag);
   const lab = mkLabel('', 'unit ' + d.side, d.mine ? 9 : 8, new THREE.Vector3()); lab.show = true;
-  return { g, meshes, pole, flag, n, lab, custom: !!d.offs, offs: d.offs || formationOffsets(d.type, n) };
+  const xmeshes = [];
+  if (d.extra) for (const [geo, role] of GEO[d.extra.type]) { const m = new THREE.InstancedMesh(geo, unitMat(role, d.side, d.ghost), d.extra.offs.length); m.castShadow = !d.ghost; m.userData.role = role; m.frustumCulled = false; g.add(m); xmeshes.push(m); }
+  return { g, meshes, pole, flag, n, lab, custom: !!d.offs, offs: d.offs || formationOffsets(d.type, n), xmeshes, xoffs: d.extra ? d.extra.offs : [] };
 }
 function layoutUnit(U, x, z, yaw) {
   const c = Math.cos(yaw), s = Math.sin(yaw); const water = U.d.inWater;
   U.meshes.forEach(m => {
     U.offs.forEach((o, i) => { const wx = x + o[0] * c + o[1] * s, wz = z - o[0] * s + o[1] * c; let y = H(wx, wz); if (water) y = Math.max(y, WATER_Y - .55); _o.position.set(wx, y, wz); _o.rotation.set(0, yaw, 0); _o.scale.setScalar(1.15); _o.updateMatrix(); m.setMatrixAt(i, _o.matrix); });
+    m.instanceMatrix.needsUpdate = true;
+  });
+  (U.xmeshes || []).forEach(m => {
+    U.xoffs.forEach((o, i) => { const wx = x + o[0] * c + o[1] * s, wz = z - o[0] * s + o[1] * c; let y = H(wx, wz); if (water) y = Math.max(y, WATER_Y - .55); _o.position.set(wx, y, wz); _o.rotation.set(0, yaw, 0); _o.scale.setScalar(1.15); _o.updateMatrix(); m.setMatrixAt(i, _o.matrix); });
     m.instanceMatrix.needsUpdate = true;
   });
   const rows = Math.ceil(U.n / (U.d.type === 'chr' ? 3 : U.d.type === 'cav' ? 4 : 6)); const back = U.custom ? Math.min(...U.offs.map(o => o[1])) - .6 : -(rows / 2) * (U.d.type === 'chr' ? 3.2 : U.d.type === 'cav' ? 1.5 : .8) - .6;
@@ -718,9 +801,9 @@ SCN.setUnits = function (list, animate) {
   for (const n in byNode) { const arr = byNode[n]; arr.forEach((d, i) => { d.slot = i - (arr.length - 1) / 2; d.slots = arr.length; }); }
   for (const d of list) {
     seen.add(d.key); let U = UG[d.key];
-    if (U && (U.custom !== !!d.offs || (d.offs && U.n !== d.offs.length) || U.d.s !== d.s || U.d.type !== d.type || U.d.ghost !== d.ghost || U.d.side !== d.side || U.style !== CUR.key)) { disposeUnit(U); delete UG[d.key]; U = null; }
+    if (U && (U.custom !== !!d.offs || (d.offs && U.n !== d.offs.length) || U.d.s !== d.s || U.d.type !== d.type || U.d.ghost !== d.ghost || U.d.side !== d.side || U.style !== CUR.key)) { var keepCur = U.cur; disposeUnit(U); delete UG[d.key]; U = null; }
     const w = worldPos(d);
-    if (!U) { U = UG[d.key] = buildUnit(d); U.d = d; U.style = CUR.key; U.cur = w.slice(); U.yaw = d.side === 'red' ? Math.PI : 0; }
+    if (!U) { U = UG[d.key] = buildUnit(d); U.d = d; U.style = CUR.key; U.cur = (keepCur || w).slice(); keepCur = null; U.yaw = d.side === 'red' ? Math.PI : 0; }
     if (d.offs) U.offs = d.offs; const prev = U.cur.slice(); U.d = d; U.d.inWater = RULES.isNode(d.pos) && RULES.NODES[d.pos.n].water;
     U.lab.d.textContent = d.label || ''; U.lab.d.className = 'lab unit ' + d.side + (d.labelCls ? ' ' + d.labelCls : ''); U.lab.show = !!d.label;
     const pts = [prev].concat((d.path || []).map(p => worldPos(Object.assign({}, d, { pos: p })))).concat([w]);
