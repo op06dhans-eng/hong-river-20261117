@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>泓水之戰．雙盲推演</title>
+<style>
+  :root{
+    --ink:#2b2118; --paper:#f4ecd8; --paper2:#e9dcc0; --red:#b3261e; --blue:#1f4e9c; --gold:#b8892b;
+    --line:#cdb88f;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;height:100%;overflow:hidden;background:#1d1a15;color:var(--ink);
+    font-family:"Noto Serif TC","Source Han Serif TC","PingFang TC","Microsoft JhengHei",serif}
+  #scene{position:fixed;inset:0}
+  .lbl{font-size:12px;padding:1px 6px;border-radius:8px;background:rgba(244,236,216,.86);color:var(--ink);
+    border:1px solid rgba(80,60,30,.35);white-space:nowrap;pointer-events:none;transform:translateY(14px)}
+  .lbl.river{background:rgba(214,232,246,.9)}
+  .tok{font-size:13px;font-weight:700;padding:2px 8px;border-radius:6px;color:#fff;white-space:nowrap;pointer-events:none;
+    box-shadow:0 1px 3px rgba(0,0,0,.4)}
+  .tok.red{background:var(--red)} .tok.blue{background:var(--blue)}
+  .tok.ghost{opacity:.6;border:1px dashed #fff}
+  .tok small{font-weight:400;opacity:.92;margin-left:4px}
+
+  /* 頂列 */
+  #top{position:fixed;top:0;left:0;right:0;display:flex;align-items:center;gap:8px;padding:8px 12px;
+    background:linear-gradient(#2b2118ee,#2b211800);color:var(--paper);z-index:5;pointer-events:none}
+  #top *{pointer-events:auto}
+  #top .side{font-weight:700;padding:3px 10px;border-radius:6px}
+  #top .side.red{background:var(--red)} #top .side.blue{background:var(--blue)} #top .side.ref{background:var(--gold)}
+  #top .grow{flex:1}
+  #top button{font:inherit;font-size:13px;padding:4px 10px;border-radius:6px;border:1px solid var(--line);
+    background:rgba(244,236,216,.92);color:var(--ink)}
+
+  /* 底部面板 */
+  #panel{position:fixed;left:0;right:0;bottom:0;max-height:52vh;overflow:auto;background:var(--paper);
+    border-top:3px solid var(--gold);padding:10px 12px 14px;z-index:5;box-shadow:0 -4px 16px rgba(0,0,0,.35)}
+  #panel h3{margin:2px 0 8px;font-size:16px}
+  .army{display:flex;align-items:center;gap:8px;padding:8px;border:1px solid var(--line);border-radius:8px;margin-bottom:6px;background:#fffaf0}
+  .army.sel{outline:3px solid var(--gold)}
+  .army .dot{width:12px;height:12px;border-radius:50%}
+  .army .info{flex:1;font-size:14px}
+  .army .ord{font-size:13px;color:#6b4e1f}
+  .badge{display:inline-block;font-size:11px;padding:0 6px;border-radius:8px;margin-left:4px;background:#e8d9b5}
+  .badge.warn{background:#f3c9a0}
+  .opts{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 4px}
+  .opts button,.btn{font:inherit;font-size:14px;padding:8px 12px;border-radius:8px;border:1px solid var(--line);background:#fff;color:var(--ink)}
+  .opts button.on{background:var(--gold);color:#fff;border-color:var(--gold)}
+  .btn.main{background:var(--ink);color:var(--paper);border-color:var(--ink);font-weight:700;width:100%;padding:12px;margin-top:6px}
+  .btn.main:disabled{opacity:.45}
+  .count{display:flex;align-items:center;gap:8px;font-size:14px;margin:4px 0}
+  .count button{width:34px;height:34px;font-size:18px;border-radius:8px;border:1px solid var(--line);background:#fff}
+  .muted{color:#7a6a50;font-size:13px}
+  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+
+  /* 彈窗 */
+  .modal{position:fixed;inset:0;background:rgba(20,15,10,.6);display:flex;align-items:center;justify-content:center;z-index:20;padding:16px}
+  .modal .card{background:var(--paper);border:2px solid var(--gold);border-radius:12px;max-width:520px;width:100%;max-height:80vh;overflow:auto;padding:16px 18px}
+  .modal h2{margin:0 0 10px;font-size:20px}
+  .modal p{margin:6px 0;line-height:1.6}
+  .log-turn{font-weight:700;margin-top:8px}
+
+  /* 首頁 */
+  #home{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;z-index:30;
+    background:radial-gradient(#3a2f22,#16120d)}
+  #home .card{background:var(--paper);border:2px solid var(--gold);border-radius:14px;padding:22px;max-width:420px;width:92%}
+  #home h1{margin:0 0 4px;font-size:26px} #home input{font:inherit;font-size:18px;padding:8px;width:100%;border-radius:8px;border:1px solid var(--line);margin:6px 0}
+
+  /* 裁判 */
+  #refbox{position:fixed;top:48px;right:8px;width:340px;max-height:calc(100vh - 60px);overflow:auto;background:var(--paper);
+    border:2px solid var(--gold);border-radius:10px;padding:10px 12px;z-index:6;font-size:14px}
+  #refbox h4{margin:10px 0 4px}
+  .qrs{display:flex;gap:8px;justify-content:space-between;text-align:center;font-size:12px}
+  .qrs img,.qrs svg{width:96px;height:96px;background:#fff;padding:3px;border-radius:4px}
+  .stat{display:flex;gap:6px;margin:4px 0}
+  .stat span{flex:1;text-align:center;padding:4px;border-radius:6px;background:#e8d9b5;font-size:13px}
+  .stat span.ok{background:#9fcf8f}
+  #banner{position:fixed;left:50%;transform:translateX(-50%);top:50px;white-space:nowrap;z-index:7;background:#7a3b10;color:#fff;font-size:12px;padding:3px 10px;border-radius:6px}
+  @media (max-width:700px){ #top{padding:6px 8px;gap:6px;font-size:13px} #top .room{display:none} #top button{padding:4px 7px;font-size:12px} }
+  @media (max-width:700px){ #refbox{left:8px;right:8px;width:auto;top:auto;bottom:8px;max-height:45vh} }
+
+  /* 投影畫面 */
+  #screenbox{position:fixed;left:16px;bottom:16px;width:min(520px,90vw);max-height:46vh;overflow:auto;background:rgba(244,236,216,.95);
+    border:2px solid var(--gold);border-radius:12px;padding:12px 16px;z-index:6;font-size:18px}
+  #screenbox .big{font-size:28px;font-weight:700}
+  #cover{position:fixed;inset:0;z-index:4;display:flex;align-items:center;justify-content:center;flex-direction:column;
+    color:var(--paper);background:radial-gradient(#3a2f22,#16120d);text-align:center}
+  #cover .t{font-size:44px;font-weight:700;letter-spacing:.2em}
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+<script src="config.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
+</head>
+<body>
+<div id="scene"></div>
+<div id="top"></div>
+<div id="ui"></div>
+<script type="module" src="app.js"></script>
+</body>
+</html>
