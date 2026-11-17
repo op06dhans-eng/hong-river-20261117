@@ -172,7 +172,7 @@ if (typeof module !== 'undefined') module.exports = { OBS, WZ, los, polyDist, PA
 // ===== 泓水之戰．雙盲推演：16 個點位在立體地形上的位置 =====
 const RULES = (function () {
   const NODES = {
-    S:  { name: '楚營',       x: -42, z: 53 },
+    S:  { name: '紅軍營地',       x: -42, z: 53 },
     W1: { name: '南岸小徑',   x: -50, z: 39 },
     W2: { name: '上游淺灘',   x: -64, z: -2.4, water: 1 },
     W3: { name: '北岸西丘',   x: -61, z: -10.5 },
@@ -187,7 +187,7 @@ const RULES = (function () {
     E3: { name: '下游北岸',   x: 57,  z: 19.5 },
     E4: { name: '東路',       x: 49,  z: -8 },
     E5: { name: '東路口',     x: 40,  z: -32 },
-    H:  { name: '宋營',       x: 22.5, z: -39 },
+    H:  { name: '藍軍本陣',       x: 22.5, z: -39 },
   };
   const isNode = p => p && p.n != null;
   const worldOf = p => [NODES[p.n].x, NODES[p.n].z];
@@ -530,17 +530,30 @@ function mkLabel(text, cls, prio, pos) { const d = document.createElement('div')
 for (const p of PLACES) mkLabel(p[0], p[5] || 'place', p[4], new THREE.Vector3(p[1], H(p[1], p[2]) + p[3], p[2]));
 const _v = new THREE.Vector3();
 function layoutLabels() {
-  const w = canvas.clientWidth, h = canvas.clientHeight; const placed = [];
+  const w = canvas.clientWidth, h = canvas.clientHeight; const placed = (window.LABEL_RESERVED || []).map(q => q.slice());
   const list = labels.filter(l => l.show).sort((a, b) => b.prio - a.prio);
   for (const l of labels) if (!l.show) l.d.style.display = 'none';
   for (const l of list) {
     _v.copy(l.pos).project(camera); const vis = _v.z < 1 && _v.x > -1.05 && _v.x < 1.05 && _v.y > -1.05 && _v.y < 1.05;
     if (!vis) { l.d.style.display = 'none'; continue; }
     const x = (_v.x * .5 + .5) * w, y = (-_v.y * .5 + .5) * h; l.d.style.display = 'block';
-    const bw = l.d.offsetWidth, bh = l.d.offsetHeight; const r = [x - bw / 2, y - bh, x + bw / 2, y];
-    let hit = false; for (const q of placed) if (r[0] < q[2] && r[2] > q[0] && r[1] < q[3] && r[3] > q[1]) { hit = true; break; }
+    const bw = l.d.offsetWidth, bh = l.d.offsetHeight; const r = l.below ? [x - bw / 2, y + 10, x + bw / 2, y + 10 + bh] : [x - bw / 2, y - bh, x + bw / 2, y];
+    const clash = () => { for (const q of placed) if (r[0] < q[2] && r[2] > q[0] && r[1] < q[3] && r[3] > q[1]) return true; return false; };
+    let hit = clash();
+    // 部隊與重要點位的標籤不能被擠掉：往旁邊錯開，直到不重疊
+    if (l.must) {
+      // 先拉回畫面內，再上下交替找空位；一定留在地圖範圍裡
+      const dx = Math.max(2 - r[0], 0) + Math.min(w - 2 - r[2], 0); r[0] += dx; r[2] += dx;
+      const y0 = Math.min(Math.max(r[1], 0), h - 2 - bh), sgn = l.below ? 1 : -1;
+      hit = true;
+      for (let k = 0; k < 15 && hit; k++) {
+        const off = (k % 2 ? 1 : -1) * Math.ceil(k / 2) * (bh + 3) * -sgn;
+        r[1] = y0 + off; r[3] = r[1] + bh;
+        hit = r[1] < 0 || r[3] > h - 2 || clash();
+      }
+    } else hit = hit || r[0] < 2 || r[2] > w - 2 || r[3] > h - 2;
     if (hit) { l.d.style.display = 'none'; continue; }
-    placed.push(r); l.d.style.transform = `translate(${(x - bw / 2).toFixed(1)}px,${(y - bh).toFixed(1)}px)`;
+    placed.push(r); l.d.style.transform = `translate(${r[0].toFixed(1)}px,${r[1].toFixed(1)}px)`;
   }
 }
 // ===== 場景擴充：鏡頭、操作、部隊、點位 =====
@@ -590,7 +603,7 @@ function zoom(f) { if (mode === 'orbit') orb.r = Math.max(orb.minR, Math.min(orb
 canvas.addEventListener('pointermove', e => {
   if (!ptrs.has(e.pointerId) || tween) return; const p = ptrs.get(e.pointerId); const dx = e.clientX - p.x, dy = e.clientY - p.y; p.x = e.clientX; p.y = e.clientY; if (downAt) downAt.moved += Math.abs(dx) + Math.abs(dy);
   if (ptrs.size === 2) { const [a, b] = [...ptrs.values()]; const d = Math.hypot(a.x - b.x, a.y - b.y); const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }; if (lastPinch) zoom(lastPinch / d); if (lastMid && mode === 'orbit') pan(mid.x - lastMid.x, mid.y - lastMid.y); lastPinch = d; lastMid = mid; applyCam(); return; }
-  if (mode === 'orbit') { if (btn === 2 || e.shiftKey) pan(dx, dy); else { orb.th -= dx * .005; orb.ph = Math.max(.12, Math.min(1.42, orb.ph - dy * .004)); } }
+  if (mode === 'orbit') { if (btn === 2 || e.shiftKey || e.pointerType === 'touch') pan(dx, dy); else { orb.th -= dx * .005; orb.ph = Math.max(.12, Math.min(1.42, orb.ph - dy * .004)); } }
   else { const k = look.fov / 60; look.yaw += dx * .004 * k; look.pitch = Math.max(-.7, Math.min(.5, look.pitch + dy * .004 * k)); }
   applyCam();
 });
@@ -772,7 +785,7 @@ function buildUnit(d) {
   // 旗
   const pole = new THREE.Mesh(new THREE.CylinderGeometry(.05, .05, 3.2, 5), unitMat('trunk', d.side, d.ghost)); pole.userData.role = 'trunk'; g.add(pole);
   const fg = new THREE.PlaneGeometry(1.4, .95, 4, 1); const flag = new THREE.Mesh(fg, unitMat('side', d.side, d.ghost)); flag.material.side = THREE.DoubleSide; flag.userData.role = 'side'; g.add(flag);
-  const lab = mkLabel('', 'unit ' + d.side, d.mine ? 9 : 8, new THREE.Vector3()); lab.show = true;
+  const lab = mkLabel('', 'unit ' + d.side, d.mine ? 9 : 8, new THREE.Vector3()); lab.show = true; lab.must = true;
   const xmeshes = [];
   if (d.extra) for (const [geo, role] of GEO[d.extra.type]) { const m = new THREE.InstancedMesh(geo, unitMat(role, d.side, d.ghost), d.extra.offs.length); m.castShadow = !d.ghost; m.userData.role = role; m.frustumCulled = false; g.add(m); xmeshes.push(m); }
   return { g, meshes, pole, flag, n, lab, custom: !!d.offs, offs: d.offs || formationOffsets(d.type, n), xmeshes, xoffs: d.extra ? d.extra.offs : [] };
@@ -803,11 +816,11 @@ SCN.setUnits = function (list, animate) {
     seen.add(d.key); let U = UG[d.key];
     if (U && (U.custom !== !!d.offs || (d.offs && U.n !== d.offs.length) || U.d.s !== d.s || U.d.type !== d.type || U.d.ghost !== d.ghost || U.d.side !== d.side || U.style !== CUR.key)) { var keepCur = U.cur; disposeUnit(U); delete UG[d.key]; U = null; }
     const w = worldPos(d);
-    if (!U) { U = UG[d.key] = buildUnit(d); U.d = d; U.style = CUR.key; U.cur = (keepCur || w).slice(); keepCur = null; U.yaw = d.side === 'red' ? Math.PI : 0; }
+    if (!U) { U = UG[d.key] = buildUnit(d); U.d = d; U.style = CUR.key; U.cur = (keepCur || (d.from ? worldPos(Object.assign({}, d, { pos: d.from })) : w)).slice(); keepCur = null; U.yaw = d.side === 'red' ? Math.PI : 0; }
     if (d.offs) U.offs = d.offs; const prev = U.cur.slice(); U.d = d; U.d.inWater = RULES.isNode(d.pos) && RULES.NODES[d.pos.n].water;
     U.lab.d.textContent = d.label || ''; U.lab.d.className = 'lab unit ' + d.side + (d.labelCls ? ' ' + d.labelCls : ''); U.lab.show = !!d.label;
     const pts = [prev].concat((d.path || []).map(p => worldPos(Object.assign({}, d, { pos: p })))).concat([w]);
-    const moved = Math.hypot(w[0] - prev[0], w[1] - prev[1]) > .5;
+    const moved = Math.hypot(w[0] - prev[0], w[1] - prev[1]) > .5 || !!(d.path && d.path.length);
     if (animate && moved) U.anim = { pts, t0: performance.now(), dur: 1800 + 500 * Math.min(3, pts.length - 2) }; else { U.anim = null; U.cur = w; layoutUnit(U, w[0], w[1], d.yaw != null ? d.yaw : (d.side === 'red' ? Math.PI : 0)); U.yaw = d.side === 'red' ? Math.PI : 0; }
   }
   for (const k in UG) if (!seen.has(k)) { disposeUnit(UG[k]); delete UG[k]; }
@@ -835,7 +848,7 @@ window.UNITS_RESTYLE = function () { for (const k in UG) { const U = UG[k]; U.g.
 const fx = [];
 SCN.battleFx = function (node, text) {
   const nd = RULES.NODES[node]; const d = document.createElement('div'); d.className = 'burst'; d.textContent = text; labLayer.appendChild(d);
-  fx.push({ d, pos: new THREE.Vector3(nd.x, nodeY(node) + 4, nd.z), t0: performance.now() }); dirty = true;
+  fx.push({ d, pos: new THREE.Vector3(nd.x, nodeY(node) + 11, nd.z), t0: performance.now() }); dirty = true;
 };
 function stepFx(now) {
   for (let i = fx.length - 1; i >= 0; i--) { const f = fx[i]; const t = (now - f.t0) / 2600; if (t >= 1) { f.d.remove(); fx.splice(i, 1); continue; }
@@ -866,6 +879,6 @@ SCN.setPlaces = on => { for (const L of labels) if (L.cls && (L.cls === 'place' 
 SCN.cityEye = () => new THREE.Vector3(OBS.city.x, CITY.h + WALL_H + OBS.city.eye, OBS.city.z);
 SCN.H = H;
 
-SCN.scene = scene; SCN.canvas = canvas; SCN.orb = orb; SCN.mkLabel = mkLabel; SCN.labels = labels; SCN.resize = resize; SCN.applyCam = applyCam;
+SCN.NODE_MARK = NODE_MARK; SCN.scene = scene; SCN.canvas = canvas; SCN.orb = orb; SCN.mkLabel = mkLabel; SCN.labels = labels; SCN.resize = resize; SCN.applyCam = applyCam;
 window.SCN = SCN; window.STY = STY; window.camera = camera;
 }

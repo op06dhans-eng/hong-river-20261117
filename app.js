@@ -1,12 +1,13 @@
-import * as R from './rules.js';
+import * as R from './rules.js?v=8';
 
 const $ = s => document.querySelector(s);
 const params = new URLSearchParams(location.search);
-let role = params.get('role');            // red | blue | ref | screen
-let room = (params.get('room') || '').toUpperCase();
+const role = params.get('role');            // red | blue | ref | screen
+let room = (params.get('room') || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);
 const SIDE_NAME = { red: '紅軍', blue: '藍軍', ref: '裁判', screen: '投影' };
-const ROLE_SIDE = { red: 'red', blue: 'blue' };
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const parse = v => (v == null ? null : typeof v === 'string' ? JSON.parse(v) : v);
+const NN = n => R.NODES[n].name;
 
 // ====================== 同步層 ======================
 async function makeBackend() {
@@ -34,183 +35,205 @@ async function makeBackend() {
     on: (p, cb) => { (subs[p] ||= []).push(cb); cb(read(p)); },
   };
 }
-const parse = v => (v == null ? null : typeof v === 'string' ? JSON.parse(v) : v);
 
 // ====================== 首頁 ======================
-if (!role || (!room && role !== 'ref')) {
+if (!['red', 'blue', 'ref', 'screen'].includes(role) || (!room && role !== 'ref')) {
   document.getElementById('loading')?.remove();
   document.body.insertAdjacentHTML('beforeend', `
   <div id="home"><div class="card">
     <h1>無名之戰</h1><div class="muted">雙盲推演．紅軍渡河，藍軍守國</div>
-    <p style="margin-top:16px">學生請掃描老師畫面上的 QR 碼。或輸入房號：</p>
-    <input id="hroom" placeholder="房號（四碼）" maxlength="6">
-    <div class="row"><button class="btn" id="hr" style="flex:1;background:var(--red);color:#fff">加入紅軍</button>
-    <button class="btn" id="hb" style="flex:1;background:var(--blue);color:#fff">加入藍軍</button></div>
-    <hr style="border:none;border-top:1px solid var(--line);margin:16px 0">
+    <p style="margin-top:16px">同學請掃描老師畫面上的 QR 碼。或輸入房號：</p>
+    <input id="hroom" placeholder="房號（四碼）" maxlength="8" autocapitalize="characters">
+    <div class="row"><button class="btn" id="hr" style="flex:1;background:var(--red);color:#fff;border-color:var(--red)">加入紅軍</button>
+    <button class="btn" id="hb" style="flex:1;background:var(--blue);color:#fff;border-color:var(--blue)">加入藍軍</button></div>
+    <div class="hline"></div>
     <button class="btn main" id="hk">我是老師：開一局新推演</button>
   </div></div>`);
-  const go = r => { const code = $('#hroom').value.trim().toUpperCase(); if (!code) return alert('請輸入房號'); location.search = `?role=${r}&room=${code}`; };
+  const go = r => { const code = $('#hroom').value.trim().toUpperCase(); if (!code) { $('#hroom').focus(); $('#hroom').placeholder = '請先輸入房號'; return; } location.search = `?role=${r}&room=${encodeURIComponent(code)}`; };
   $('#hr').onclick = () => go('red'); $('#hb').onclick = () => go('blue');
   $('#hk').onclick = () => { location.search = '?role=ref'; };
   throw new Error('home');
 }
 if (role === 'ref' && !room) {
-  room = Math.random().toString(36).slice(2, 6).toUpperCase().replace(/[O0I1]/g, 'X');
+  const abc = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  room = Array.from({ length: 4 }, () => abc[Math.floor(Math.random() * abc.length)]).join('');
   history.replaceState(null, '', `?role=ref&room=${room}`);
 }
+document.body.classList.add('role-' + role);
 
-// ====================== 立體場景（立體戰場移植自《國君的抉擇》，見 world.js） ======================
+// ====================== 立體場景（world.js） ======================
 const THREE = window.THREE;
-const COLORS = { red: '#b3261e', blue: '#1f4e9c', both: '#c9962c' };
-const VIEW_SIDE = ROLE_SIDE[role] || 'red';
-window.SOLDIERS_PER = { inf: 12 };
+const COLORS = { red: '#b3261e', blue: '#1f4e9c' };
+const VIEW_SIDE = role === 'blue' ? 'blue' : 'red';
 bootScene();
 const canvas = SCN.canvas;
 const NODE_IDS = Object.keys(R.NODES);
 const wp = id => { const n = RULES.NODES[id]; return new THREE.Vector3(n.x, Math.max(SCN.H(n.x, n.z), 0.05), n.z); };
 
+// 點位名稱放在點位下方，才不會和部隊標籤疊在一起；與點位同名的地名不重複顯示
+for (const k of NODE_IDS) { const L = SCN.NODE_MARK[k].lab; L.below = true; L.pos.y -= 2.0; SCN.NODE_MARK[k].ring.material.opacity = 0; }
+{ const names = new Set(NODE_IDS.map(NN)); for (const L of SCN.labels) if (L.cls === 'place' && names.has(L.text)) L.show = false; }
+
 // 鏡頭：紅軍從南往北看，藍軍從北往南看
 const TH = VIEW_SIDE === 'blue' ? Math.PI : 0;
 function focusNodes(ids, instant) {
+  ids = ids.filter(n => R.NODES[n]);
   if (!ids.length) return;
   const ps = ids.map(wp);
-  const c = ps.reduce((s, p) => s.add(p), new THREE.Vector3()).multiplyScalar(1 / ps.length);
-  let span = 0; for (const p of ps) span = Math.max(span, Math.hypot(p.x - c.x, p.z - c.z));
+  const xs = ps.map(p => p.x), zs = ps.map(p => p.z);
+  const c = new THREE.Vector3((Math.min(...xs) + Math.max(...xs)) / 2, 0, (Math.min(...zs) + Math.max(...zs)) / 2);
+  const wx = Math.max(...xs) - Math.min(...xs) + 40, wz = Math.max(...zs) - Math.min(...zs) + 30;
   const aspect = canvas.clientWidth / Math.max(1, canvas.clientHeight);
-  const r = Math.max(42, Math.min(230, (span * 2 + 22) / Math.min(1.1, Math.max(0.55, aspect)) * 1.05));
+  // 視角約 42 度、俯角固定：依畫面長寬算出剛好放得下的距離
+  const r = Math.max(48, Math.min(300, Math.max(wz * 0.95, wx / aspect * 1.25)));
   SCN.flyOrbit({ target: new THREE.Vector3(c.x, 0, c.z), r, th: TH, ph: 0.85 }, instant);
 }
-function resetCamera(instant) { SCN.flyOrbit({ target: new THREE.Vector3(0, 0, -2), r: canvas.clientWidth < canvas.clientHeight ? 230 : 160, th: TH, ph: 0.82 }, instant); }
+function resetCamera(instant) { focusNodes(NODE_IDS, instant); }
 
-// 部隊：步卒與戰車模型移植自《陣法立體版》。每個兵力單位畫 12 名步卒，每支部隊前面一乘將車（只是圖示，規則上全是步兵）
+// ---------- 部隊 ----------
+// 步卒與戰車模型移植自《陣法立體版》。每個兵力單位畫 12 名步卒，每支部隊前面一乘將車（圖示，算法等同步兵）
 const PER_UNIT = 12;
 function infOffs(n, disorder) {
   const cols = Math.min(12, n), out = [];
   for (let i = 0; i < n; i++) {
     const r = Math.floor(i / cols), inRow = Math.min(cols, n - r * cols), c = i % cols;
-    const j = disorder ? 0.55 : 0.08, h = (k) => { const v = Math.sin(i * 12.9898 + k * 78.233) * 43758.5453; return (v - Math.floor(v) - .5) * 2 * j; };
+    const j = disorder ? 0.55 : 0.08, h = k => { const v = Math.sin(i * 12.9898 + k * 78.233) * 43758.5453; return (v - Math.floor(v) - .5) * 2 * j; };
     out.push([(c - (inRow - 1) / 2) * 0.72 + h(1), -1.6 - r * 0.85 + h(2)]);
   }
   return out;
 }
-function setTokens(list, animate = true) {
-  SCN.setUnits(list.map(t => {
-    const a = t.army, ch = a.side === 'red' ? '紅' : '藍';
-    const st = a.side === 'red' && a.state && a.state !== 'formed' ? ' ' + R.STATE_LABEL[a.state] : '';
-    const label = t.ghost ? `${ch} ${a.units}？ 第${a.turn}回合目擊` : `${ch} ${a.units}${st}`;
-    const disorder = a.side === 'red' && a.state && a.state !== 'formed';
-    return { key: (t.ghost ? 'g' : 'a') + a.id, side: a.side, type: 'zinf_' + a.side, s: a.units * 100 + (disorder ? 1 : 0), pos: { n: a.node },
-      offs: infOffs(a.units * PER_UNIT, disorder), extra: { type: 'zchr_' + a.side, offs: [[0, 1.4]] },
-      label, labelCls: t.ghost ? 'ghost' : '', ghost: !!t.ghost, mine: a.side === VIEW_SIDE };
-  }), animate);
+function tok(a, kind, animate) {
+  const ch = a.side === 'red' ? '紅' : '藍';
+  const weak = a.side === 'red' && a.state && a.state !== 'formed';
+  const ghost = kind === 'ghost', fallen = kind === 'fallen';
+  const label = ghost ? `${ch} ${a.units}？ 第${a.turn}回合目擊` : fallen ? `${ch} ${a.units} 潰散` : `${ch} ${a.units}${weak ? ' ' + R.STATE_LABEL[a.state] : ''}`;
+  const trail = animate && !ghost && a.trail && a.trail.length > 1 ? a.trail : null;
+  return {
+    key: (ghost ? 'g' : 'a') + a.id, side: a.side, type: 'zinf_' + a.side, s: a.units * 100 + (weak ? 1 : 0), pos: { n: a.node },
+    path: trail ? trail.slice(1, -1).map(n => ({ n })) : [], from: trail ? { n: trail[0] } : null,
+    offs: infOffs(a.units * PER_UNIT, weak), extra: { type: 'zchr_' + a.side, offs: [[0, 1.4]] },
+    label, labelCls: ghost ? 'ghost' : fallen ? 'ghost' : '', ghost, mine: a.side === VIEW_SIDE,
+  };
+}
+// data: { armies, ghosts, fallen }；animate＝播放這回合的行軍（含戰敗退回、潰散的部隊先走到交戰點再消失）
+let sceneGen = 0;
+function syncScene(data, animate) {
+  const gen = ++sceneGen;
+  const live = [...data.armies.map(a => tok(a, 'live', animate)), ...(data.ghosts || []).map(a => tok(a, 'ghost', false))];
+  const fallen = animate ? (data.fallen || []).map(a => tok(a, 'fallen', true)) : [];
+  SCN.setUnits([...live, ...fallen], animate);
+  if (fallen.length) setTimeout(() => { if (gen === sceneGen) SCN.setUnits(live.map(d => ({ ...d, path: [], from: null })), false); }, 3700);
+}
+function battleBursts(lines) {
+  for (const t of lines) { const m = String(t).match(/^【(.+)之戰】/); if (!m) continue; const id = NODE_IDS.find(k => NN(k) === m[1]); if (id) SCN.battleFx(id, m[1] + '接戰'); }
 }
 
-// 命令箭頭（沿地面起伏）
-const arrowLayer = new THREE.Group(); SCN.scene.add(arrowLayer);
-function drawArrows(items) {
-  arrowLayer.children.slice().forEach(o => { arrowLayer.remove(o); o.traverse(m => { m.geometry?.dispose(); m.material?.dispose(); }); });
-  flows.length = 0;
-  for (const it of items) {
-    const A = wp(it.from), B = wp(it.to);
-    const dir = B.clone().sub(A); dir.y = 0; const len = dir.length(); dir.normalize();
-    const pts = [];
-    for (let i = 0; i <= 24; i++) {
-      const t = i / 24, d = 3 + (len - 10) * t;
-      const x = A.x + dir.x * d, z = A.z + dir.z * d;
-      pts.push(new THREE.Vector3(x, Math.max(SCN.H(x, z), 0.05) + 2.2 + Math.sin(t * Math.PI) * 3.5, z));
-    }
-    const col = it.strike ? MK_COL.attack : MK_COL[it.side];
-    const g = new THREE.Group();
-    const curve = new THREE.CatmullRomCurve3(pts);
-    // 白色外框＋彩色主體，濾鏡下也看得清楚
-    const edge = new THREE.Mesh(new THREE.TubeGeometry(curve, 48, 1.15, 8), new THREE.MeshBasicMaterial({ color: '#ffffff', depthTest: false, fog: false }));
-    edge.renderOrder = 22; g.add(edge);
-    const body = new THREE.Mesh(new THREE.TubeGeometry(curve, 48, 0.8, 8), new THREE.MeshBasicMaterial({ color: col, depthTest: false, fog: false }));
-    body.renderOrder = 23; g.add(body);
-    const end = pts[pts.length - 1], prev = pts[pts.length - 3];
-    const dirE = end.clone().sub(prev).normalize();
-    const headE = new THREE.Mesh(new THREE.ConeGeometry(3.0, 6.0, 16), new THREE.MeshBasicMaterial({ color: '#ffffff', depthTest: false, fog: false }));
-    headE.position.copy(end); headE.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dirE); headE.renderOrder = 22; g.add(headE);
-    const head = new THREE.Mesh(new THREE.ConeGeometry(2.3, 5.0, 16), new THREE.MeshBasicMaterial({ color: col, depthTest: false, fog: false }));
-    head.position.copy(end).addScaledVector(dirE, 0.3); head.quaternion.copy(headE.quaternion); head.renderOrder = 23; g.add(head);
-    // 沿路流動的小箭頭，表示行進方向
-    const dense = curve.getPoints(80); const chev = [];
-    for (let i = 0; i < 4; i++) { const c = new THREE.Mesh(new THREE.ConeGeometry(1.0, 2.2, 10), new THREE.MeshBasicMaterial({ color: '#ffffff', depthTest: false, fog: false })); c.renderOrder = 24; g.add(c); chev.push(c); }
-    flows.push({ pts: dense, chev });
-    arrowLayer.add(g);
-  }
-  SCN.dirty();
-}
-
-// 點位標記：黃＝本軍所在、綠＝可前往、橘紅＝出擊目標、白＝本軍能走的點位
-const MK_COL = { here: '#ffd23f', move: '#2ee86b', attack: '#ff5a1f', idle: '#ffffff', red: '#ff4a3d', blue: '#4a9bff' };
+// ---------- 點位標記與命令箭頭 ----------
+const MK_COL = { here: '#ffd23f', move: '#2ee86b', attack: '#ff5a1f', idle: '#ffffff', red: '#ff4a3d', blue: '#4a9bff', both: '#f0c040' };
 const markLayer = new THREE.Group(); SCN.scene.add(markLayer);
-const bobbers = [];
-function drawMarkers(map, idleNodes = []) {
-  const all = { ...Object.fromEntries(idleNodes.map(n => [n, 'idle'])), ...map };
-  SCN.setMarkers(all, false);
-  markLayer.children.slice().forEach(o => { markLayer.remove(o); o.traverse(m => { m.geometry?.dispose(); m.material?.dispose(); }); });
-  bobbers.length = 0;
-  for (const [n, st] of Object.entries(all)) {
-    const p = wp(n); const col = MK_COL[st] || '#ffffff';
-    const strong = st !== 'idle';
+const arrowLayer = new THREE.Group(); SCN.scene.add(arrowLayer);
+const bobbers = [], flows = [];
+const clearLayer = L => L.children.slice().forEach(o => { L.remove(o); o.traverse(m => { m.geometry?.dispose(); m.material?.dispose(); }); });
+// map: { 點位: 'here' | 'move' | 'attack' | 'idle' | 'red' | 'blue' | 'both' }
+function drawMarkers(map) {
+  clearLayer(markLayer); bobbers.length = 0;
+  for (const k of NODE_IDS) {
+    const st = map[k], L = SCN.NODE_MARK[k].lab;
+    L.show = !!st; L.must = st === 'here' || st === 'move' || st === 'attack'; L.prio = st === 'move' || st === 'attack' ? 7 : st === 'here' ? 6 : 5;
+    if (L.d) L.d.className = 'lab node ' + (st || '');
+    if (!st) continue;
+    const p = wp(k), col = MK_COL[st], strong = st === 'here' || st === 'move' || st === 'attack';
     const g = new THREE.Group(); g.position.set(p.x, p.y + 0.35, p.z);
-    const ringG = new THREE.RingGeometry(strong ? 3.6 : 3.2, strong ? 5.4 : 4.3, 48); ringG.rotateX(-Math.PI / 2);
-    const ring = new THREE.Mesh(ringG, new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: strong ? 0.95 : 0.75, depthTest: false, side: THREE.DoubleSide, fog: false }));
+    const ringG = new THREE.RingGeometry(strong ? 3.4 : 3.0, strong ? 5.8 : 4.8, 48); ringG.rotateX(-Math.PI / 2);
+    const ring = new THREE.Mesh(ringG, new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.95, depthTest: false, side: THREE.DoubleSide, fog: false }));
     ring.renderOrder = 20; g.add(ring);
-    const discG = new THREE.CircleGeometry(strong ? 3.6 : 3.2, 40); discG.rotateX(-Math.PI / 2);
+    // 深色外緣，讓圈在草地和油畫濾鏡上都看得清楚
+    const rimG = new THREE.RingGeometry(strong ? 5.8 : 4.8, strong ? 6.5 : 5.4, 48); rimG.rotateX(-Math.PI / 2);
+    const rim = new THREE.Mesh(rimG, new THREE.MeshBasicMaterial({ color: '#1d140c', transparent: true, opacity: 0.75, depthTest: false, side: THREE.DoubleSide, fog: false }));
+    rim.renderOrder = 20; ring.add(rim);
+    const discG = new THREE.CircleGeometry(strong ? 3.4 : 3.0, 40); discG.rotateX(-Math.PI / 2);
     const disc = new THREE.Mesh(discG, new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: strong ? 0.28 : 0.12, depthTest: false, fog: false }));
     disc.renderOrder = 19; g.add(disc);
     if (st === 'move' || st === 'attack') {
       // 目標點上方浮動的菱形指標（不做直衝天際的光柱）
       const gem = new THREE.Mesh(new THREE.OctahedronGeometry(1.5), new THREE.MeshBasicMaterial({ color: col, depthTest: false, fog: false }));
       gem.scale.set(1, 1.6, 1); gem.position.y = 6; gem.renderOrder = 21; g.add(gem);
-      bobbers.push({ gem, ring, base: 6 });
+      bobbers.push({ gem, ring });
     }
     markLayer.add(g);
   }
   SCN.dirty();
 }
-// 點位與箭頭的動態（只在有東西要動時才持續重畫）
-const flows = [];
+// items: [{ from, to, side, strike }]
+function drawArrows(items) {
+  clearLayer(arrowLayer); flows.length = 0;
+  const flat = c => new THREE.MeshBasicMaterial({ color: c, depthTest: false, fog: false });
+  for (const it of items) {
+    if (!R.NODES[it.from] || !R.NODES[it.to]) continue;
+    const A = wp(it.from), B = wp(it.to);
+    const dir = B.clone().sub(A); dir.y = 0; const len = dir.length(); dir.normalize();
+    const pts = [];
+    for (let i = 0; i <= 24; i++) {
+      const d0 = Math.min(3, len * 0.15), d1 = len - Math.min(7, len * 0.3);
+      const t = i / 24, d = d0 + (d1 - d0) * t, x = A.x + dir.x * d, z = A.z + dir.z * d;
+      pts.push(new THREE.Vector3(x, Math.max(SCN.H(x, z), 0.05) + 2.2 + Math.sin(t * Math.PI) * 3.5, z));
+    }
+    const col = it.strike ? MK_COL.attack : MK_COL[it.side];
+    const g = new THREE.Group(), curve = new THREE.CatmullRomCurve3(pts);
+    const edge = new THREE.Mesh(new THREE.TubeGeometry(curve, 48, 1.15, 8), flat('#ffffff')); edge.renderOrder = 22; g.add(edge);
+    const body = new THREE.Mesh(new THREE.TubeGeometry(curve, 48, 0.8, 8), flat(col)); body.renderOrder = 23; g.add(body);
+    const end = pts[pts.length - 1], dirE = end.clone().sub(pts[pts.length - 3]).normalize();
+    const headE = new THREE.Mesh(new THREE.ConeGeometry(3.0, 6.0, 16), flat('#ffffff'));
+    headE.position.copy(end); headE.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dirE); headE.renderOrder = 22; g.add(headE);
+    const head = new THREE.Mesh(new THREE.ConeGeometry(2.3, 5.0, 16), flat(col));
+    head.position.copy(end).addScaledVector(dirE, 0.3); head.quaternion.copy(headE.quaternion); head.renderOrder = 23; g.add(head);
+    const chev = [];
+    for (let i = 0; i < 4; i++) { const c = new THREE.Mesh(new THREE.ConeGeometry(1.0, 2.2, 10), flat('#ffffff')); c.renderOrder = 24; g.add(c); chev.push(c); }
+    flows.push({ pts: curve.getPoints(80), chev });
+    arrowLayer.add(g);
+  }
+  SCN.dirty();
+}
 (function anim(t) {
   requestAnimationFrame(anim);
   if (!bobbers.length && !flows.length) return;
-  const s = t / 1000;
-  for (const b of bobbers) {
-    b.ring.scale.setScalar(1 + 0.12 * Math.sin(s * 4));
-    if (b.gem) { b.gem.position.y = b.base + Math.sin(s * 3) * 0.8; b.gem.rotation.y = s * 1.5; }
-  }
-  for (const f of flows) f.chev.forEach((c, i) => { const u = ((s * 0.35 + i / f.chev.length) % 1); const k = Math.floor(u * (f.pts.length - 1)); c.position.copy(f.pts[k]); c.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), f.pts[Math.min(k + 1, f.pts.length - 1)].clone().sub(f.pts[Math.max(k - 1, 0)]).normalize()); });
+  const s = t / 1000, up = new THREE.Vector3(0, 1, 0);
+  for (const b of bobbers) { b.ring.scale.setScalar(1 + 0.12 * Math.sin(s * 4)); b.gem.position.y = 6 + Math.sin(s * 3) * 0.8; b.gem.rotation.y = s * 1.5; }
+  for (const f of flows) f.chev.forEach((c, i) => {
+    const u = (s * 0.35 + i / f.chev.length) % 1, k = Math.floor(u * (f.pts.length - 1));
+    c.position.copy(f.pts[k]); c.quaternion.setFromUnitVectors(up, f.pts[Math.min(k + 1, f.pts.length - 1)].clone().sub(f.pts[Math.max(k - 1, 0)]).normalize());
+  });
   SCN.dirty();
 })(0);
-// 學生只看本軍能走的點位
 const myNodes = side => NODE_IDS.filter(n => R.NODES[n].side === side || R.NODES[n].side === 'both');
+const allNodeMarks = () => Object.fromEntries(NODE_IDS.map(n => [n, n === 'H' ? 'blue' : n === 'S' ? 'red' : R.NODES[n].side]));
 
-// 點選地圖上的點位
 let onNodeTap = null;
-SCN.onNodeClick = n => onNodeTap?.(n);
+SCN.onNodeClick = n => { if (R.NODES[n]) onNodeTap?.(n); };
 
-// 版面：地圖只佔面板以外的區域
-const SIDE_MQ = matchMedia('(orientation: landscape) and (max-height: 520px)');
+// ---------- 版面：地圖只佔面板以外的區域，面板不蓋住戰場 ----------
+let lastW = 0, lastH = 0;
 function resize() {
-  const p = document.getElementById('panel');
-  let w = innerWidth, h = innerHeight;
-  if (p) { if (SIDE_MQ.matches) w -= p.offsetWidth; else h -= p.offsetHeight; }
+  const dock = $('#panel,#refbox,#screenbox');
+  let w = innerWidth, h = innerHeight, dr = 0;
+  if (dock && getComputedStyle(dock).display !== 'none') {
+    const r = dock.getBoundingClientRect();
+    if (r.height >= innerHeight - 2 && r.width < innerWidth - 60) { dr = Math.round(r.width); w -= dr; } else h -= Math.round(r.height);
+  }
+  document.body.style.setProperty('--dockR', dr + 'px');
+  window.LABEL_RESERVED = [[0, 0, w, 46]];
+  if (w === lastW && h === lastH) return;
+  lastW = w; lastH = h;
   canvas.style.width = w + 'px'; canvas.style.height = h + 'px';
+  const lab = $('#labels'); lab.style.width = w + 'px'; lab.style.height = h + 'px';
   SCN.resize();
 }
 addEventListener('resize', resize);
-new ResizeObserver(() => resize()).observe(document.body);
+const dockWatch = new ResizeObserver(() => resize());
 let sty = 'B'; try { sty = localStorage.getItem('hong-style') || 'B'; } catch (e) { }
 SCN.start(); if (sty === 'D') SCN.applyStyle('D');
 resize(); resetCamera(true);
 document.getElementById('loading')?.remove();
-
-// 交戰處冒出「接戰」字樣
-function battleBursts(lines) {
-  for (const t of lines) { const m = t.match(/^【(.+)之戰】/); if (!m) continue; const id = NODE_IDS.find(k => R.NODES[k].name === m[1]); if (id) SCN.battleFx(id, m[1] + '接戰'); }
-}
 
 // ====================== 共用介面 ======================
 function topBar(extra = '') {
@@ -221,167 +244,197 @@ function topBar(extra = '') {
   $('#sty').onclick = () => { const k = document.body.dataset.style === 'B' ? 'D' : 'B'; SCN.applyStyle(k); try { localStorage.setItem('hong-style', k); } catch (e) { } };
 }
 function modal(html, onClose) {
+  document.querySelectorAll('.modal').forEach(m => m.remove());
   const m = document.createElement('div'); m.className = 'modal';
   m.innerHTML = `<div class="card">${html}<button class="btn main" style="margin-top:12px">知道了</button></div>`;
   m.querySelector('.btn.main').onclick = () => { m.remove(); onClose?.(); };
   document.body.appendChild(m);
 }
-function toast(t) {
-  let d = document.getElementById('toast'); if (!d) { d = document.createElement('div'); d.id = 'toast'; document.body.appendChild(d); }
-  d.textContent = t; d.style.display = 'block'; clearTimeout(toast._t); toast._t = setTimeout(() => d.style.display = 'none', 1800);
+function confirmBox(text, yes) {
+  document.querySelectorAll('.modal').forEach(m => m.remove());
+  const m = document.createElement('div'); m.className = 'modal';
+  m.innerHTML = `<div class="card"><p style="font-size:16px">${esc(text)}</p><div class="row" style="margin-top:12px"><button class="btn main" id="cy" style="flex:1;margin:0">確定</button><button class="btn" id="cn" style="flex:1;padding:12px">取消</button></div></div>`;
+  m.querySelector('#cy').onclick = () => { m.remove(); yes(); };
+  m.querySelector('#cn').onclick = () => m.remove();
+  document.body.appendChild(m);
 }
+function toast(t, ms = 2200) {
+  let d = $('#toast'); if (!d) { d = document.createElement('div'); d.id = 'toast'; document.body.appendChild(d); }
+  d.textContent = t; d.style.display = 'block'; clearTimeout(toast._t); toast._t = setTimeout(() => d.style.display = 'none', ms);
+}
+function prestigeBar(p, max) {
+  let h = '<span class="pbar">';
+  for (let i = 0; i < max; i++) h += `<i class="${i < p ? (p <= max * 0.6 ? 'on low' : 'on') : ''}"></i>`;
+  return h + `</span><b class="pnum ${p <= max * 0.6 ? 'low' : ''}">國君聲望 ${p}／${max}</b>`;
+}
+function logHtml(log) {
+  return log.map(l => `<div class="log-turn">第 ${l.turn} 回合</div>${l.lines.map(x => `<p>${esc(x.t ?? x)}</p>`).join('')}`).join('') || '<p class="muted">尚無紀錄。</p>';
+}
+function orderText(o, a) {
+  if (!o || o.type === 'hold') return '原地固守';
+  if (o.type === 'regroup') return '重新列陣';
+  const n = o.count && o.count < a.units ? `（派 ${o.count}，留 ${a.units - o.count}）` : '';
+  return (o.type === 'strike' ? `出擊${NN(o.to)}` : `前往${NN(o.to)}`) + n;
+}
+const stBadge = a => a.side === 'red' ? `<span class="badge ${a.state !== 'formed' ? 'warn' : ''}">${R.STATE_LABEL[a.state]}</span>` : '';
 // 推演結束才揭曉是哪一場戰役
 const REVEAL = `<div class="reveal"><h2>揭曉：這是泓之戰</h2>
   <p>西元前 638 年（魯僖公二十二年），楚國伐宋以救鄭，宋襄公迎戰於泓水。<b>紅軍是楚，藍軍是宋，藍軍國君就是宋襄公。</b></p>
   <p class="yw">「宋人既成列，楚人未既濟。司馬曰：『彼眾我寡，及其未既濟也，請擊之。』公曰：『不可。』既濟而未成列，又以告。公曰：『未可。』既陳而後擊之，宋師敗績。」（《左傳・僖公二十二年》）</p>
   <p class="muted">白話：宋軍已經列好陣，楚軍還沒渡完河。司馬子魚說：「敵眾我寡，趁他們還沒渡完，請下令攻擊。」襄公說：「不行。」楚軍渡完河還沒列陣，子魚又請戰，襄公說：「還不行。」等楚軍列好陣才進攻，宋軍大敗。</p>
   <p>想一想：剛才你們的藍軍在哪一刻出手？和宋襄公的選擇一樣嗎？如果「打贏」和「聲望滿分」只能選一個，你會選哪個？宋襄公又為什麼這樣選？</p></div>`;
-// 聲望條（十格）
-function prestigeBar(p, max = 10) {
-  let h = '<span class="pbar" title="藍軍國君聲望">';
-  for (let i = 0; i < max; i++) h += `<i class="${i < p ? (p <= 6 ? 'on low' : 'on') : ''}"></i>`;
-  return h + `</span><b class="pnum ${p <= 6 ? 'low' : ''}">聲望 ${p}／${max}</b>`;
+// 須知的數字一律取自這一局的參數
+function helpHtml(side, c) {
+  const pct = Math.round(c.disorderFactor * 100);
+  const common = `<p>• 每回合每支部隊可移動一格（一個圈到相鄰的圈），也可以分兵。</p>
+    <p>• 只看得到同一條路線上相距 ${c.sightRange} 格以內的敵軍；看不到不代表沒有。</p>
+    <p>• 送出命令後，要等老師結算，雙方才會<b>同時</b>行動。</p>`;
+  if (side === 'red') return `<h2>你是紅軍</h2>
+    <p>你率紅軍 ${c.redUnits} 個單位自南方來，必須渡過南河。<b>任何一支部隊攻入藍軍本陣就獲勝。</b></p>${common}
+    <p>• 站在渡口（河中）時戰力只剩 ${pct}%；上岸後也只有 ${pct}%，要按「重新列陣」原地停一回合才恢復。列陣時被攻擊，列陣會被打斷。</p>
+    <p>• 折損 ${R.redLoseAt(c)} 個單位就算戰敗；第 ${c.maxTurns} 回合結束還沒攻入藍軍本陣，也算戰敗。</p>`;
+  return `<h2>你是藍軍</h2>
+    <p>你率藍軍 ${c.blueUnits} 個單位守國都，敵眾我寡。<b>讓紅軍折損 ${R.redLoseAt(c)} 個單位，或守到第 ${c.maxTurns} 回合結束，就獲勝。</b></p>${common}
+    <p>• 你只能在北岸行動，不渡河。</p>
+    <p>• 紅軍在河中或上岸還沒列陣時，戰力只剩 ${pct}%，而你打這種敵人戰力 ×${c.strikeBonus}。站在河岸點可以「出擊」對岸渡口。</p>
+    <p>• 紅軍列好陣後和你正面交戰，你多半打不過。</p>
+    <p>• <b>聲望</b>：你是以諸侯盟主自居的國君，聲望滿分 ${c.prestige}。<b>主動攻擊</b>還在渡河、或上岸還沒列陣的紅軍（「出擊」渡口，或走進他們所在的點位），就算打贏，也會被諸侯議論不仁，每次交戰聲望 −${c.prestigeHit}。紅軍自己衝上你守住的點位則不扣。結算時同時看<b>戰果</b>與<b>聲望</b>。</p>`;
 }
-function logHtml(log, fromTurn = 0) {
-  return log.filter(l => l.turn >= fromTurn).map(l => `<div class="log-turn">第 ${l.turn} 回合</div>${l.lines.map(x => `<p>${esc(x)}</p>`).join('')}`).join('') || '<p class="muted">尚無紀錄。</p>';
-}
-function orderText(o, a) {
-  if (!o || o.type === 'hold') return '原地固守';
-  if (o.type === 'regroup') return '重新列陣';
-  const n = o.count && o.count < a.units ? `（派 ${o.count}）` : '';
-  if (o.type === 'strike') return `出擊${R.NODES[o.to].name}${n}`;
-  return `前往${R.NODES[o.to].name}${n}`;
-}
-function armyName(a, list) { const i = list.filter(x => x.side === a.side).indexOf(a); return ['第一軍', '第二軍', '第三軍', '第四軍', '第五軍', '第六軍'][i] || '部隊'; }
 
 const be = await makeBackend();
-if (be.mode === 'local') document.body.insertAdjacentHTML('beforeend', `<div id="banner">${innerWidth < 700 ? '單機測試模式' : '單機測試模式：尚未設定 Firebase，僅同一瀏覽器的分頁互相同步'}</div>`);
+if (be.mode === 'local') document.body.insertAdjacentHTML('beforeend', '<div id="banner">單機測試模式</div>');
 
 // ====================== 學生（紅／藍） ======================
 if (role === 'red' || role === 'blue') {
   const side = role;
-  document.body.classList.add(side);
-
   topBar('<button id="logb">戰報</button><button id="helpb">規則</button><button id="mineb">我軍</button>');
   $('#ui').innerHTML = '<div id="panel"><div class="muted">連線中…</div></div>';
-  let view = null, draft = {}, sel = null, submitted = null, lastTurn = null;
+  dockWatch.observe($('#panel'));
+  let view = null, draft = {}, sel = null, submitted = null, pendingT = 0, helped = false;
 
-  const focusMine = instant => view && focusNodes(view.mine.flatMap(a => [a.node, ...Object.keys(R.ADJ[side][a.node] || {})]), instant);
+  const reach = a => [a.node, ...R.legalOrders(null, a).filter(o => o.to).map(o => o.to)];
+  const focusMine = instant => view && view.mine.length && focusNodes(view.mine.flatMap(reach), instant);
+  const focusSel = () => { const a = view.mine.find(x => x.id === sel); if (a) focusNodes(reach(a)); };
+  const showHelp = () => view && modal(helpHtml(side, view.cfg));
   $('#mineb').onclick = () => focusMine();
   $('#logb').onclick = () => view && modal(`<h2>戰報</h2>${logHtml(view.log)}`);
-  const showHelp = () => modal(side === 'red' ? `<h2>紅軍須知</h2>
-    <p>你率紅軍 6 個步兵單位自南方來，必須渡過南河，攻入藍軍本陣即勝。</p>
-    <p>• 每回合每支部隊可移動一格，也可以分兵走不同路線。</p>
-    <p>• 站在河中（渡口）時戰力只剩一半；上岸後也只有一半，要按「重新列陣」停一回合才恢復。</p>
-    <p>• 只看得到同一條路線上相距兩格以內的藍軍。</p>
-    <p>• 折損 3 個單位即敗；12 回合內未能攻入藍軍本陣也算敗。</p>` : `<h2>藍軍須知</h2>
-    <p>你率藍軍 3 個步兵單位守國都，敵眾我寡。</p>
-    <p>• 每回合每支部隊可移動一格，也可以分兵。只能在北岸行動，不渡河。</p>
-    <p>• 只看得到同一條路線上相距兩格以內的紅軍。</p>
-    <p>• 紅軍在河中或上岸未成列時，戰力只剩一半，而你打擊這種敵人戰力 ×1.5。站在河岸點可以「出擊」對岸渡口。</p>
-    <p>• 紅軍列好陣後與你正面交戰，你幾乎必敗。</p>
-    <p>• 讓紅軍折損 3 個單位，或守住 12 回合，即勝。</p>
-    <p>• <b>聲望</b>：你是以諸侯盟主自居的國君，聲望滿分 10。<b>主動攻擊</b>還在渡河、或上岸還沒列陣的紅軍（例如「出擊」渡口，或走進他們所在的點位），就算打贏，也會被諸侯議論不仁，每次交戰聲望 −2。紅軍自己衝上你守住的河岸則不扣。結算時同時看<b>戰果</b>與<b>聲望</b>。</p>`);
   $('#helpb').onclick = showHelp;
-  try { if (!localStorage.getItem('hong-help-' + side)) { localStorage.setItem('hong-help-' + side, '1'); setTimeout(showHelp, 400); } } catch (e) { }
 
   be.on(`view/${side}`, v => {
     v = parse(v);
-    if (!v) { $('#panel').innerHTML = '<div class="muted">等待老師開局…</div>'; return; }
-    const newTurn = lastTurn !== null && v.turn !== lastTurn;
-    const ended = v.status !== 'playing' && view?.status === 'playing';
-    if (newTurn) { draft = {}; sel = null; }
-    const prevTurn = lastTurn;
-    const first = !view;
-    view = v; lastTurn = v.turn;
+    if (!v || v.ver !== R.VERSION) { $('#panel').innerHTML = '<div class="muted">等待老師開局…（如果老師已經開局，請重新整理這個頁面）</div>'; resize(); return; }
+    const prev = view; view = v;
+    const first = !prev;
+    const rewound = prev && (v.turn < prev.turn || (prev.status !== 'playing' && v.status === 'playing'));
+    const advanced = prev && !rewound && (v.turn > prev.turn || (prev.status === 'playing' && v.status !== 'playing'));
+    if (first || rewound || advanced) { draft = {}; sel = null; }
+    if (submitted && submitted.turn === v.turn && v.status === 'playing' && !Object.keys(draft).length) draft = structuredClone(submitted.orders || {});
+    syncScene({ armies: [...v.mine, ...v.enemies], ghosts: v.ghosts.map(gh => ({ ...gh, side: side === 'red' ? 'blue' : 'red' })), fallen: v.fallen }, !!advanced);
     render();
-    if (first || newTurn) focusMine(first);
-    if (ended) modal(`<h2>${esc(v.result)}</h2><p class="muted">地圖上已顯示敵軍全部位置。</p>${logHtml(v.log, (prevTurn ?? v.turn))}${REVEAL}`);
-    else if (newTurn) {
-      const rep = v.log.filter(l => l.turn === prevTurn);
-      if (rep.length) battleBursts(rep[0].lines);
-      if (rep.length && !(rep[0].lines.length === 1 && rep[0].lines[0] === '雙方未接觸。')) modal(`<h2>第 ${prevTurn} 回合戰報</h2>${logHtml(rep)}`);
+    clearTimeout(pendingT);
+    if (first) {
+      focusMine(true);
+      try { if (!localStorage.getItem(`hong-help-${side}-${room}`)) { localStorage.setItem(`hong-help-${side}-${room}`, '1'); helped = true; setTimeout(showHelp, 300); } } catch (e) { }
+      if (!helped && v.status !== 'playing') modal(`<h2>${esc(v.result)}</h2>${logHtml(v.log.slice(-1))}${REVEAL}`);
+    } else if (rewound) {
+      document.querySelectorAll('.modal').forEach(m => m.remove());
+      toast('老師已重新開局或回到上一回合'); focusMine();
+    } else if (advanced) {
+      const rep = v.log.filter(l => l.turn === prev.turn), lines = rep.flatMap(l => l.lines);
+      const battle = lines.some(t => /之戰】|潰散/.test(t));
+      setTimeout(() => battleBursts(lines), 1500);
+      // 先讓大家看完行軍，再跳出戰報，不擋住戰場
+      if (v.status !== 'playing') pendingT = setTimeout(() => modal(`<h2>${esc(v.result)}</h2><p class="muted">地圖上已顯示雙方全部位置。</p>${logHtml(rep)}${REVEAL}`), 3900);
+      else if (battle) pendingT = setTimeout(() => modal(`<h2>第 ${prev.turn} 回合戰報</h2>${logHtml(rep)}`, () => focusMine()), 3900);
+      else { toast(`第 ${prev.turn} 回合：${lines.find(t => !/分兵/.test(t)) || '沒有發現敵軍'}`, 3200); pendingT = setTimeout(() => focusMine(), 2600); }
     }
   });
-  be.on(`orders/${side}`, v => { v = parse(v); submitted = v && view && v.turn === view.turn ? v : (v && !view ? v : null); render(); });
+  be.on(`orders/${side}`, v => {
+    submitted = parse(v);
+    if (view && submitted && submitted.turn === view.turn && !Object.keys(draft).length) draft = structuredClone(submitted.orders || {});
+    render();
+  });
 
-  const focusSel = () => { const a = view.mine.find(x => x.id === sel); if (a) focusNodes([a.node, ...Object.keys(R.ADJ[side][a.node] || {})]); };
   onNodeTap = n => {
     if (!view || view.status !== 'playing') return;
     const sa = view.mine.find(x => x.id === sel);
     const o = sa && R.legalOrders(null, sa).find(x => x.to === n);
-    if (o) { draft[sel] = { ...o, count: draft[sel]?.count && draft[sel].type === o.type ? draft[sel].count : sa.units }; render(); return; }
+    if (o) { setOrder(sa, o); return; }
     const mine = view.mine.find(x => x.node === n);
     if (mine) { sel = mine.id; render(); focusSel(); return; }
     sel = null; render();
   };
+  function setOrder(a, o) {
+    if (o.type === 'hold') delete draft[a.id];
+    else if (o.type === 'regroup') draft[a.id] = { type: 'regroup' };
+    else { const keep = draft[a.id]; draft[a.id] = { type: o.type, to: o.to, count: keep && keep.type === o.type && keep.to === o.to ? keep.count : a.units }; }
+    render();
+  }
+  const sameOrders = (x, y) => JSON.stringify(Object.entries(x || {}).sort()) === JSON.stringify(Object.entries(y || {}).sort());
+
   function render() {
     if (!view) return;
-    const sub = submitted && submitted.turn === view.turn;
-    setTokens([...view.mine.map(a => ({ army: a })), ...view.enemies.map(a => ({ army: a })), ...view.ghosts.map(a => ({ army: { ...a, side: side === 'red' ? 'blue' : 'red' }, ghost: true }))]);
-    const sa = view.mine.find(a => a.id === sel);
-    drawArrows(view.mine.filter(a => draft[a.id] && draft[a.id].to).map(a => ({ from: a.node, to: draft[a.id].to, side, strike: draft[a.id].type === 'strike' })));
+    const playing = view.status === 'playing';
+    const sub = playing && submitted && submitted.turn === view.turn;
+    const changed = sub && !sameOrders(draft, submitted.orders);
+    const sa = playing ? view.mine.find(a => a.id === sel) : null;
+    // 地圖標記
     const mk = {};
-    if (view.status === 'playing') {
+    if (playing) {
+      for (const n of myNodes(side)) mk[n] = 'idle';
       for (const a of view.mine) mk[a.node] = 'here';
       if (sa) for (const o of R.legalOrders(null, sa)) if (o.to) mk[o.to] = o.type === 'strike' ? 'attack' : 'move';
-    }
-    drawMarkers(mk, view.status === 'playing' ? myNodes(side) : []);
-    const lost = view.lost[side];
-    const lim = Math.ceil(view.cfg.redUnits / 2);
-    let h = `<div class="phead"><b>第 ${view.turn} 回合</b><span class="muted">已損 ${lost}${side === 'red' ? `／損 ${lim} 即敗` : ''}</span></div>`;
-    if (side === 'blue' && view.prestige != null) h += `<div class="prest">${prestigeBar(view.prestige, view.cfg.prestige ?? 10)}</div>`;
-    if (view.status !== 'playing') {
-      h += `<p><b>${esc(view.result)}</b></p><p class="muted">推演結束。請看老師的投影畫面。</p>`;
-      $('#panel').innerHTML = h; resize(); return;
+    } else Object.assign(mk, allNodeMarks());
+    drawMarkers(mk);
+    drawArrows(playing ? view.mine.filter(a => draft[a.id]?.to).map(a => ({ from: a.node, to: draft[a.id].to, side, strike: draft[a.id].type === 'strike' })) : []);
+    // 面板
+    const c = view.cfg;
+    let h = `<div class="phead"><b>第 ${view.turn}／${c.maxTurns} 回合</b><span class="muted">${side === 'red' ? `已折損 ${view.lost.red}（滿 ${R.redLoseAt(c)} 即敗）` : `紅軍已折損 ${view.lost.red}／${R.redLoseAt(c)}，我軍折損 ${view.lost.blue}`}</span></div>`;
+    if (view.prestige != null) h += `<div class="prest">${prestigeBar(view.prestige, c.prestige)}</div>`;
+    if (!playing) {
+      h += `<p class="result"><b>${esc(view.result)}</b></p><button class="btn main" id="again">看結果與揭曉</button>`;
+      $('#panel').innerHTML = h; resize();
+      $('#again').onclick = () => modal(`<h2>${esc(view.result)}</h2>${logHtml(view.log.slice(-1))}${REVEAL}`);
+      return;
     }
     h += '<div class="chips">';
-    for (const a of view.mine) {
-      const st = side === 'red' && a.state !== 'formed' ? `<span class="badge warn">${R.STATE_LABEL[a.state]}</span>` : '';
-      h += `<div class="chip ${a.id === sel ? 'sel' : ''}" data-id="${a.id}"><b>${armyName(a, view.mine)}</b> ${a.units}${st}<br><span class="where">${R.NODES[a.node].name}</span><span class="ord">→ ${orderText(draft[a.id], a)}</span></div>`;
-    }
+    for (const a of view.mine) h += `<div class="chip ${a.id === sel ? 'sel' : ''}" data-id="${a.id}"><b>${NN(a.node)}</b>　${a.units} 單位${stBadge(a)}<br><span class="ord">命令：${orderText(draft[a.id], a)}</span></div>`;
     if (!view.mine.length) h += '<span class="muted">你已沒有部隊。</span>';
     h += '</div>';
     if (sa) {
       const o = draft[sa.id] || { type: 'hold' };
-      const short = x => x.type === 'hold' ? '固守' : x.type === 'regroup' ? '重新列陣' : x.type === 'strike' ? `出擊${R.NODES[x.to].name}（聲望−${view.cfg.prestigeHit ?? 2}）` : `→ ${R.NODES[x.to].name}`;
+      const short = x => x.type === 'hold' ? '固守' : x.type === 'regroup' ? '重新列陣' : x.type === 'strike' ? `出擊${NN(x.to)}（聲望−${c.prestigeHit}）` : `→ ${NN(x.to)}`;
       h += `<div class="opts">${R.legalOrders(null, sa).map((x, i) => `<button data-i="${i}" class="${x.type === o.type && x.to === o.to ? 'on' : ''} ${x.type === 'strike' ? 'strike' : ''}">${esc(short(x))}</button>`).join('')}</div>`;
-      if ((o.type === 'move' || o.type === 'strike') && sa.units > 1) {
-        const c = o.count || sa.units;
-        h += `<div class="count">派出 <button data-c="-1">－</button><b>${c}</b><button data-c="1">＋</button> <span class="muted">${c < sa.units ? `其餘 ${sa.units - c} 留守` : '全軍'}</span></div>`;
+      if (o.to && sa.units > 1) {
+        const n = o.count || sa.units;
+        h += `<div class="count">派出 <button data-c="-1">－</button><b>${n}</b><button data-c="1">＋</button> <span class="muted">${n < sa.units ? `其餘 ${sa.units - n} 個單位留守` : '全軍出動'}</span></div>`;
       }
-    } else if (view.mine.length) h += '<div class="muted hint">點部隊（下方或地圖上）下令，沒下令的原地固守。</div>';
-    h += `<button class="btn main" id="send">${sub ? '已送出（可修改再送）' : '送出本回合命令'}</button>`;
-    if (sub) h += `<div class="waitnote">命令已送達。<b>老師按下「結算本回合」後，雙方部隊才會同時行動</b>，在那之前部隊會留在原地。</div>`;
+    } else if (view.mine.length) h += '<div class="muted hint">點部隊（上面的卡片，或地圖上的黃圈）再選去處。白圈是你能走的點位，綠圈是這支部隊現在能去的地方。</div>';
+    h += `<button class="btn main ${sub && !changed ? 'sent' : ''}" id="send">${!sub ? '送出本回合命令' : changed ? '命令有修改：重新送出' : '✓ 已送出（可修改後再送）'}</button>`;
+    if (sub && !changed) h += '<div class="waitnote">命令已送達。<b>老師結算後，雙方部隊才會同時行動</b>，在那之前部隊會留在原地。</div>';
     $('#panel').innerHTML = h;
     resize();
     $('#panel').querySelectorAll('.chip').forEach(el => el.onclick = () => { sel = sel === el.dataset.id ? null : el.dataset.id; render(); if (sel) focusSel(); else focusMine(); });
-    $('#panel').querySelectorAll('.opts button').forEach(el => el.onclick = () => {
-      const x = R.legalOrders(null, sa)[+el.dataset.i];
-      draft[sa.id] = x.type === 'hold' ? undefined : { type: x.type, to: x.to, count: sa.units };
-      if (!draft[sa.id]) delete draft[sa.id];
-      render();
-    });
-    $('#panel').querySelectorAll('.count button').forEach(el => el.onclick = () => {
-      const o = draft[sa.id]; o.count = Math.max(1, Math.min(sa.units, (o.count || sa.units) + +el.dataset.c)); render();
-    });
+    $('#panel').querySelectorAll('.opts button').forEach(el => el.onclick = () => setOrder(sa, R.legalOrders(null, sa)[+el.dataset.i]));
+    $('#panel').querySelectorAll('.count button').forEach(el => el.onclick = () => { const o = draft[sa.id]; o.count = Math.max(1, Math.min(sa.units, (o.count || sa.units) + +el.dataset.c)); render(); });
     $('#send').onclick = async () => {
       const clean = {};
-      for (const [k, o] of Object.entries(draft)) if (o) clean[k] = { type: o.type, ...(o.to ? { to: o.to } : {}), ...(o.count ? { count: o.count } : {}) };
-      await be.set(`orders/${side}`, JSON.stringify({ turn: view.turn, orders: clean, at: Date.now() }));
-      sel = null; render(); toast('✓ 命令已送出');
+      for (const a of view.mine) { const o = draft[a.id]; if (o) clean[a.id] = { type: o.type, ...(o.to ? { to: o.to, count: o.count || a.units } : {}) }; }
+      const turn = view.turn;
+      try { await be.set(`orders/${side}`, JSON.stringify({ turn, orders: clean, at: Date.now() })); sel = null; render(); toast('✓ 命令已送出'); focusMine(); }
+      catch (e) { toast('送出失敗，請檢查網路後再試一次', 4000); }
     };
   }
 }
 
 // ====================== 裁判 ======================
 if (role === 'ref') {
-
   topBar('<button id="hide">收合面板</button>');
   $('#ui').innerHTML = '<div id="refbox"></div>';
-  let game = null, ord = { red: null, blue: null }, hist = [], showQR = true, autoRes = false, resolving = false;
+  dockWatch.observe($('#refbox')); resize(); resetCamera(true);
+  let game = null, shown = null, ord = { red: null, blue: null }, hist = [], showQR = true, autoRes = false, busy = false, autoT = 0;
   try { autoRes = localStorage.getItem('hong-auto') === '1'; } catch (e) { }
-  $('#hide').onclick = () => { const b = $('#refbox'); b.style.display = b.style.display === 'none' ? '' : 'none'; };
+  $('#hide').onclick = () => { const b = $('#refbox'), off = b.style.display === 'none'; b.style.display = off ? '' : 'none'; $('#hide').textContent = off ? '收合面板' : '顯示面板'; resize(); };
 
   const base = location.href.split('?')[0];
   const link = r => `${base}?role=${r}&room=${room}`;
@@ -391,10 +444,10 @@ if (role === 'ref') {
     if (pushHist && game) hist = [...hist, game].slice(-30);
     game = g;
     await be.set('history', JSON.stringify(hist));
-    await be.set('full', JSON.stringify(g));
     await be.set('view/red', JSON.stringify(R.viewFor(g, 'red')));
     await be.set('view/blue', JSON.stringify(R.viewFor(g, 'blue')));
-    await be.set('view/public', JSON.stringify({ turn: g.turn, status: g.status, result: g.result, log: g.log, lost: g.lost, armies: g.status === 'playing' ? [] : g.armies }));
+    await be.set('view/public', JSON.stringify(R.publicView(g)));
+    await be.set('full', JSON.stringify(g));
   }
   be.on('history', v => { hist = parse(v) || []; });
   let started = false;
@@ -402,101 +455,130 @@ if (role === 'ref') {
     v = parse(v);
     if (!v && !started) { started = true; publish(R.newGame(), false); return; }
     started = true;
-    if (v) { game = v; render(); }
+    if (!v) return;
+    if (v.ver !== R.VERSION) { toast('這個房號留有舊版的戰局，已自動重新開局', 4000); restart({}); return; }
+    game = v;
+    const advanced = shown && v.log.length > shown.log.length;
+    syncScene({ armies: v.armies, fallen: v.fallen }, !!advanced);
+    if (advanced) { const lines = v.log.at(-1).lines.map(x => x.t); setTimeout(() => battleBursts(lines), 1500); }
+    shown = v;
+    render();
   });
   be.on('orders/red', v => { ord.red = parse(v); render(); });
   be.on('orders/blue', v => { ord.blue = parse(v); render(); });
 
+  function cur(s) { return game && ord[s] && ord[s].turn === game.turn ? ord[s] : null; }
+  async function resolve() {
+    if (busy || !game || game.status !== 'playing') return;
+    busy = true; clearTimeout(autoT);
+    try { await publish(R.resolveTurn(game, { ...(cur('red')?.orders || {}), ...(cur('blue')?.orders || {}) })); }
+    catch (e) { toast('結算失敗：' + e.message, 5000); }
+    busy = false; render();
+  }
+  async function restart(opts) {
+    hist = []; clearTimeout(autoT);
+    await be.set('orders/red', null); await be.set('orders/blue', null);
+    shown = null;
+    await publish(R.newGame(opts), false);
+    toast('已重新開局');
+  }
+
   function render() {
     if (!game) return;
-    setTokens(game.armies.map(a => ({ army: a })));
-    drawMarkers({});
-    const cur = s => ord[s] && ord[s].turn === game.turn ? ord[s] : null;
+    const playing = game.status === 'playing', c = game.cfg;
+    drawMarkers(allNodeMarks());
     const arrows = [];
     for (const s of ['red', 'blue']) {
-      const o = cur(s); if (!o) continue;
-      for (const [id, x] of Object.entries(o.orders)) {
-        const a = game.armies.find(y => y.id === id);
-        if (a && x.to) arrows.push({ from: a.node, to: x.to, side: s, strike: x.type === 'strike', text: x.count && x.count < a.units ? `派 ${x.count}` : '' });
-      }
+      const o = playing && cur(s); if (!o) continue;
+      for (const [id, x] of Object.entries(o.orders || {})) { const a = game.armies.find(y => y.id === id && y.side === s); if (a && x.to && R.legalOrders(null, a).some(l => l.to === x.to && l.type === x.type)) arrows.push({ from: a.node, to: x.to, side: s, strike: x.type === 'strike' }); }
     }
     drawArrows(arrows);
-    const ordList = s => {
-      const o = cur(s);
-      const mine = game.armies.filter(a => a.side === s);
-      if (!o) return '<div class="muted">尚未送出</div>';
-      return mine.map(a => `<div>• ${armyName(a, mine)}（${R.NODES[a.node].name}，${a.units}${s === 'red' ? '，' + R.STATE_LABEL[a.state] : ''}）：${orderText(o.orders[a.id], a)}</div>`).join('');
-    };
+    const armyList = s => game.armies.filter(a => a.side === s).map(a => {
+      const o = cur(s)?.orders?.[a.id];
+      return `<div class="arow"><b>${NN(a.node)}</b> ${a.units} 單位${stBadge(a)}${playing ? `<span class="ord">${cur(s) ? orderText(o, a) : '尚未下令'}</span>` : ''}</div>`;
+    }).join('') || '<div class="muted">已無部隊</div>';
     const both = cur('red') && cur('blue');
-    let h = '';
-    h += `<div class="row" style="justify-content:space-between"><b style="font-size:18px">第 ${game.turn} 回合</b><span class="muted">紅損 ${game.lost.red}／藍損 ${game.lost.blue}</span></div><div class="prest">${prestigeBar(game.prestige ?? 10, game.cfg.prestige ?? 10)}</div>`;
-    if (game.status !== 'playing') h += `<p style="font-weight:700;color:var(--red)">${esc(game.result)}</p>${REVEAL}`;
-    h += `<h4>學生入口 <button class="btn" id="qrt" style="padding:2px 8px;font-size:12px">${showQR ? '隱藏' : '顯示'}</button></h4>`;
-    if (showQR) h += `<div class="qrs"><div>${qr(link('red'))}<br><b style="color:var(--red)">紅軍</b></div><div>${qr(link('blue'))}<br><b style="color:var(--blue)">藍軍</b></div><div>${qr(link('screen'))}<br><b>投影畫面</b></div></div>
-      <div class="muted" style="word-break:break-all;margin-top:4px">房號 ${esc(room)}</div>`;
-    h += `<div class="stat"><span class="${cur('red') ? 'ok' : ''}">紅軍${cur('red') ? '已下令' : '未下令'}</span><span class="${cur('blue') ? 'ok' : ''}">藍軍${cur('blue') ? '已下令' : '未下令'}</span></div>`;
-    h += `<h4 style="color:var(--red)">紅軍命令</h4>${ordList('red')}<h4 style="color:var(--blue)">藍軍命令</h4>${ordList('blue')}`;
-    if (game.status === 'playing') h += `<button class="btn main" id="res">${both ? '結算本回合' : '結算本回合（未下令者原地固守）'}</button>
+    let h = `<div class="row" style="justify-content:space-between"><b style="font-size:18px">第 ${game.turn}／${c.maxTurns} 回合</b><span class="muted">紅軍折損 ${game.lost.red}／${R.redLoseAt(c)}　藍軍折損 ${game.lost.blue}</span></div>
+      <div class="prest">${prestigeBar(game.prestige, c.prestige)}</div>`;
+    if (!playing) h += `<p class="result"><b>${esc(game.result)}</b></p>`;
+    h += `<h4>學生入口　房號 ${esc(room)} <button class="btn sm" id="qrt">${showQR ? '隱藏 QR 碼' : '顯示 QR 碼'}</button></h4>`;
+    if (showQR) h += `<div class="qrs"><div>${qr(link('red'))}<br><b style="color:var(--red)">紅軍</b></div><div>${qr(link('blue'))}<br><b style="color:var(--blue)">藍軍</b></div><div>${qr(link('screen'))}<br><b>投影畫面</b></div></div>`;
+    if (playing) h += `<div class="stat"><span class="${cur('red') ? 'ok' : 'wait'}">紅軍${cur('red') ? '已下令' : '尚未下令'}</span><span class="${cur('blue') ? 'ok' : 'wait'}">藍軍${cur('blue') ? '已下令' : '尚未下令'}</span></div>`;
+    h += `<h4 style="color:var(--red)">紅軍</h4>${armyList('red')}<h4 style="color:var(--blue)">藍軍</h4>${armyList('blue')}`;
+    if (playing) h += `<button class="btn main" id="res">${both ? '結算本回合' : '結算本回合（未下令的一方原地固守）'}</button>
       <label class="auto"><input type="checkbox" id="autoR" ${autoRes ? 'checked' : ''}> 雙方都送出命令後，3 秒自動結算</label>`;
-    h += `<div class="row" style="margin-top:8px"><button class="btn" id="undo" ${hist.length ? '' : 'disabled'}>回上一回合</button><button class="btn" id="new">重新開局</button><button class="btn" id="lg">完整戰報</button></div>`;
-    h += `<details style="margin-top:8px"><summary>參數設定（重新開局時套用）</summary>
-      <div class="count">紅軍兵力 <input id="sRed" type="number" value="${game.cfg.redUnits}" min="2" max="12" style="width:60px"></div>
-      <div class="count">藍軍兵力 <input id="sBlue" type="number" value="${game.cfg.blueUnits}" min="1" max="9" style="width:60px"></div>
-      <div class="count">回合上限 <input id="sMax" type="number" value="${game.cfg.maxTurns}" min="4" max="30" style="width:60px"></div>
-      <div class="count">擊其不整加成 <input id="sBonus" type="number" step="0.25" value="${game.cfg.strikeBonus}" min="1" max="3" style="width:70px"></div>
-      <div class="count">發現距離 <input id="sSight" type="number" value="${game.cfg.sightRange}" min="1" max="4" style="width:60px"> 格</div>
-      <div class="count">聲望每次扣 <input id="sPH" type="number" value="${game.cfg.prestigeHit ?? 2}" min="0" max="5" style="width:60px"> 點</div></details>`;
+    h += `<div class="row" style="margin-top:8px">${hist.length ? '<button class="btn" id="undo">回上一回合</button>' : ''}<button class="btn" id="new">重新開局</button><button class="btn" id="lg">完整戰報</button></div>`;
+    const L = R.LIMITS, inp = (id, k, step = 1) => `<input id="${id}" type="number" step="${step}" value="${c[k]}" min="${L[k][0]}" max="${L[k][1]}">`;
+    h += `<details id="cfg"><summary>參數設定（按「套用並重新開局」才生效）</summary>
+      <div class="count">紅軍兵力 ${inp('sRed', 'redUnits')} 個單位</div>
+      <div class="count">藍軍兵力 ${inp('sBlue', 'blueUnits')} 個單位</div>
+      <div class="count">回合上限 ${inp('sMax', 'maxTurns')} 回合</div>
+      <div class="count">擊其不整加成 ×${inp('sBonus', 'strikeBonus', 0.25)}</div>
+      <div class="count">發現距離 ${inp('sSight', 'sightRange')} 格</div>
+      <div class="count">聲望每次扣 ${inp('sPH', 'prestigeHit')} 點</div>
+      <button class="btn" id="apply">套用並重新開局</button>
+      <div class="muted">學生手機上的規則說明會自動跟著這些數字改。</div></details>
+      <div class="muted legend">地圖圈色：紅＝只有紅軍能走，藍＝只有藍軍能走，金＝雙方都能走。</div>`;
     const last = game.log.at(-1);
     if (last) h += `<h4>最近戰報</h4>${logHtml([last])}`;
+    if (!playing) h += REVEAL;
+    const open = $('#cfg')?.open, sc = $('#refbox').scrollTop;
     $('#refbox').innerHTML = h;
+    if (open) $('#cfg').open = true;
+    $('#refbox').scrollTop = sc;
+    resize();
     $('#qrt').onclick = () => { showQR = !showQR; render(); };
-    const ar = $('#autoR'); if (ar) ar.onchange = () => { autoRes = ar.checked; try { localStorage.setItem('hong-auto', autoRes ? '1' : '0'); } catch (e) { } render(); };
-    if (autoRes && both && game.status === 'playing' && !resolving) {
-      resolving = true; const t0 = game.turn;
-      setTimeout(async () => { if (game.turn === t0 && cur('red') && cur('blue')) await publish(R.resolveTurn(game, { ...cur('red').orders, ...cur('blue').orders })); resolving = false; }, 3000);
-    }
     $('#lg').onclick = () => modal(`<h2>完整戰報</h2>${logHtml(game.log)}`);
-    const res = $('#res'); if (res) res.onclick = async () => {
-      if (!both && !confirm('還有一方沒下令，未下令的部隊將原地固守。確定結算？')) return;
-      const orders = { ...(cur('red')?.orders || {}), ...(cur('blue')?.orders || {}) };
-      await publish(R.resolveTurn(game, orders));
-    };
-    $('#undo').onclick = async () => {
-      if (!hist.length || !confirm('回到上一回合的局面？')) return;
-      const prev = hist[hist.length - 1]; hist = hist.slice(0, -1);
-      await publish(prev, false);
+    if ($('#res')) $('#res').onclick = () => (both ? resolve() : confirmBox('還有一方沒下令，沒下令的部隊會原地固守。確定結算？', resolve));
+    const ar = $('#autoR'); if (ar) ar.onchange = () => { autoRes = ar.checked; try { localStorage.setItem('hong-auto', autoRes ? '1' : '0'); } catch (e) { } render(); };
+    clearTimeout(autoT);
+    if (autoRes && both && playing && !busy) { const t0 = game.turn; autoT = setTimeout(() => { if (game.turn === t0 && cur('red') && cur('blue')) resolve(); }, 3000); }
+    if ($('#undo')) $('#undo').onclick = () => confirmBox('回到上一回合的局面？雙方這回合已送出的命令會清掉。', async () => {
+      if (!hist.length) return;
+      const prev = hist[hist.length - 1]; hist = hist.slice(0, -1); shown = null;
       await be.set('orders/red', null); await be.set('orders/blue', null);
-    };
-    $('#new').onclick = async () => {
-      if (!confirm('重新開局？目前戰局會清除。')) return;
-      const n = id => +$(id).value;
-      hist = [];
-      await be.set('orders/red', null); await be.set('orders/blue', null);
-      await publish(R.newGame({ redUnits: n('#sRed'), blueUnits: n('#sBlue'), maxTurns: n('#sMax'), strikeBonus: n('#sBonus'), sightRange: n('#sSight'), prestigeHit: n('#sPH') }), false);
+      await publish(prev, false); toast('已回到上一回合');
+    });
+    $('#new').onclick = () => confirmBox('重新開局？目前的戰局會清除，參數維持這一局的設定。', () => restart(c));
+    $('#apply').onclick = () => {
+      const n = id => Number($(id).value);
+      confirmBox('套用新參數並重新開局？目前的戰局會清除。', () => restart({ redUnits: n('#sRed'), blueUnits: n('#sBlue'), maxTurns: n('#sMax'), strikeBonus: n('#sBonus'), sightRange: n('#sSight'), prestigeHit: n('#sPH') }));
     };
   }
 }
 
 // ====================== 投影畫面 ======================
 if (role === 'screen') {
-
   topBar('');
   $('#ui').innerHTML = '<div id="screenbox"></div>';
-  let pub = null, ord = { red: null, blue: null };
-  be.on('view/public', v => { pub = parse(v); render(); });
+  dockWatch.observe($('#screenbox')); resize(); resetCamera(true);
+  let pub = null, shown = null, ord = { red: null, blue: null };
+  be.on('view/public', v => {
+    pub = parse(v);
+    if (pub && pub.ver !== R.VERSION) pub = null;
+    if (pub) {
+      const advanced = shown && pub.log.length > shown.log.length;
+      syncScene({ armies: pub.armies, fallen: pub.fallen }, false);
+      if (advanced) battleBursts(pub.log.at(-1).lines);
+      shown = pub;
+    }
+    render();
+  });
   be.on('orders/red', v => { ord.red = parse(v); render(); });
   be.on('orders/blue', v => { ord.blue = parse(v); render(); });
   function render() {
-    if (!pub) { $('#screenbox').innerHTML = '<div class="muted">等待開局…</div>'; return; }
-    setTokens(pub.armies.map(a => ({ army: a })));
-    drawMarkers({});
+    if (!pub) { $('#screenbox').innerHTML = '<div class="muted">等待老師開局…</div>'; resize(); return; }
+    const playing = pub.status === 'playing', c = pub.cfg;
+    drawMarkers(allNodeMarks());
     const ok = s => ord[s] && ord[s].turn === pub.turn;
-    let h = pub.status === 'playing'
-      ? `<div class="big">第 ${pub.turn} 回合</div><div class="stat"><span class="${ok('red') ? 'ok' : ''}">紅軍${ok('red') ? '已下令' : '思考中'}</span><span class="${ok('blue') ? 'ok' : ''}">藍軍${ok('blue') ? '已下令' : '思考中'}</span></div>
-         <div class="muted">戰場上的兵力只在各隊手機上顯示。</div>`
-      : `<div class="big">${esc(pub.result)}</div><div class="muted">雙方全部部隊已揭曉。</div>${REVEAL}`;
-    const last = pub.log.at(-1);
-    if (last) h += logHtml(pub.status === 'playing' ? [last] : pub.log);
+    let h = playing
+      ? `<div class="big">第 ${pub.turn}／${c.maxTurns} 回合</div><div class="stat"><span class="${ok('red') ? 'ok' : 'wait'}">紅軍${ok('red') ? '已下令' : '思考中'}</span><span class="${ok('blue') ? 'ok' : 'wait'}">藍軍${ok('blue') ? '已下令' : '思考中'}</span></div>
+         <div class="muted">戰場上的兵力只在各隊手機上顯示。紅軍折損 ${pub.lost.red}／${R.redLoseAt(c)}，藍軍折損 ${pub.lost.blue}。</div>`
+      : `<div class="big">${esc(pub.result)}</div><div class="prest">${prestigeBar(pub.prestige, c.prestige)}</div><div class="muted">雙方全部部隊已揭曉。</div>`;
+    h += `<div class="muted legend">地圖圈色：紅＝只有紅軍能走，藍＝只有藍軍能走，金＝雙方都能走。</div>`;
+    if (pub.log.length) h += logHtml(playing ? pub.log.slice(-1) : pub.log);
+    if (!playing) h += REVEAL;
     $('#screenbox').innerHTML = h;
+    resize();
   }
 }

@@ -21,3 +21,14 @@ body[data-style=D] .lab.unit.blue{color:#8cc8ff;border-color:#2f9bff}
 body[data-style=D] .lab.node.move{color:#7dffaa;border-color:#3fd27a;border-width:2px}
 body[data-style=D] .lab.node.attack{color:#ff8a80;border-color:#ff3b30;border-width:2px}
 body[data-style=D] .lab.node.here{color:#ffe27a;border-color:#ffd23f}
+#labels{position:fixed;left:0;top:0;right:auto;bottom:auto;width:100%;height:100%}
+.lab.node{background:rgba(255,252,240,.95);border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.5)}
+.lab.node.idle{border-color:#fff}
+.lab.node.red{border-color:#ff4a3d}.lab.node.blue{border-color:#4a9bff}.lab.node.both{border-color:#f0c040}
+.lab.node.here{background:#fff3c0;border-color:#ffd23f}
+.lab.node.move{background:#e3ffe9;border-color:#2ee86b}
+.lab.node.attack{background:#ffe6d8;border-color:#ff5a1f;color:#8a2a08}
+.lab.unit{font-size:13px;box-shadow:0 1px 4px rgba(0,0,0,.55);border:1px solid rgba(255,255,255,.7)}
+.lab.unit.ghost{opacity:.85;border:2px dashed #fff}
+body[data-style=D] .lab.node{background:rgba(0,20,30,.85);color:#dff}
+body[data-style=D] .lab.node.red{color:#ff8a80;border-color:#ff3b30}body[data-style=D] .lab.node.blue{color:#8cc8ff;border-color:#2f9bff}body[data-style=D] .lab.node.both{color:#ffe27a;border-color:#f0c040}
