@@ -96,30 +96,83 @@ function setTokens(list, animate = true) {
 const arrowLayer = new THREE.Group(); SCN.scene.add(arrowLayer);
 function drawArrows(items) {
   arrowLayer.children.slice().forEach(o => { arrowLayer.remove(o); o.traverse(m => { m.geometry?.dispose(); m.material?.dispose(); }); });
+  flows.length = 0;
   for (const it of items) {
     const A = wp(it.from), B = wp(it.to);
     const dir = B.clone().sub(A); dir.y = 0; const len = dir.length(); dir.normalize();
     const pts = [];
     for (let i = 0; i <= 24; i++) {
-      const t = i / 24, d = 4 + (len - 9) * t;
+      const t = i / 24, d = 3 + (len - 10) * t;
       const x = A.x + dir.x * d, z = A.z + dir.z * d;
-      pts.push(new THREE.Vector3(x, Math.max(SCN.H(x, z), 0.05) + 1.4 + Math.sin(t * Math.PI) * 2.5, z));
+      pts.push(new THREE.Vector3(x, Math.max(SCN.H(x, z), 0.05) + 2.2 + Math.sin(t * Math.PI) * 3.5, z));
     }
-    const col = it.strike ? '#ff7a00' : COLORS[it.side];
-    const mat = new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.92, depthTest: false });
+    const col = it.strike ? MK_COL.attack : MK_COL[it.side];
     const g = new THREE.Group();
-    const tube = new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 40, 0.45, 6), mat); tube.renderOrder = 9; g.add(tube);
-    const head = new THREE.Mesh(new THREE.ConeGeometry(1.4, 3.4, 12), mat.clone()); head.renderOrder = 9;
+    const curve = new THREE.CatmullRomCurve3(pts);
+    // 白色外框＋彩色主體，濾鏡下也看得清楚
+    const edge = new THREE.Mesh(new THREE.TubeGeometry(curve, 48, 1.15, 8), new THREE.MeshBasicMaterial({ color: '#ffffff', depthTest: false, fog: false }));
+    edge.renderOrder = 22; g.add(edge);
+    const body = new THREE.Mesh(new THREE.TubeGeometry(curve, 48, 0.8, 8), new THREE.MeshBasicMaterial({ color: col, depthTest: false, fog: false }));
+    body.renderOrder = 23; g.add(body);
     const end = pts[pts.length - 1], prev = pts[pts.length - 3];
-    head.position.copy(end); head.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), end.clone().sub(prev).normalize()); g.add(head);
+    const dirE = end.clone().sub(prev).normalize();
+    const headE = new THREE.Mesh(new THREE.ConeGeometry(3.0, 6.0, 16), new THREE.MeshBasicMaterial({ color: '#ffffff', depthTest: false, fog: false }));
+    headE.position.copy(end); headE.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dirE); headE.renderOrder = 22; g.add(headE);
+    const head = new THREE.Mesh(new THREE.ConeGeometry(2.3, 5.0, 16), new THREE.MeshBasicMaterial({ color: col, depthTest: false, fog: false }));
+    head.position.copy(end).addScaledVector(dirE, 0.3); head.quaternion.copy(headE.quaternion); head.renderOrder = 23; g.add(head);
+    // 沿路流動的小箭頭，表示行進方向
+    const dense = curve.getPoints(80); const chev = [];
+    for (let i = 0; i < 4; i++) { const c = new THREE.Mesh(new THREE.ConeGeometry(1.0, 2.2, 10), new THREE.MeshBasicMaterial({ color: '#ffffff', depthTest: false, fog: false })); c.renderOrder = 24; g.add(c); chev.push(c); }
+    flows.push({ pts: dense, chev });
     arrowLayer.add(g);
   }
   SCN.dirty();
 }
 
-// 點位圈：黃＝本軍所在、綠＝可前往、紅＝出擊目標；白＝其他點位
-let showAllNodes = true;
-function drawMarkers(map) { SCN.setMarkers(map, showAllNodes); }
+// 點位標記：黃＝本軍所在、綠＝可前往、橘紅＝出擊目標、白＝本軍能走的點位
+const MK_COL = { here: '#ffd23f', move: '#2ee86b', attack: '#ff5a1f', idle: '#ffffff', red: '#ff4a3d', blue: '#4a9bff' };
+const markLayer = new THREE.Group(); SCN.scene.add(markLayer);
+const bobbers = [];
+function drawMarkers(map, idleNodes = []) {
+  const all = { ...Object.fromEntries(idleNodes.map(n => [n, 'idle'])), ...map };
+  SCN.setMarkers(all, false);
+  markLayer.children.slice().forEach(o => { markLayer.remove(o); o.traverse(m => { m.geometry?.dispose(); m.material?.dispose(); }); });
+  bobbers.length = 0;
+  for (const [n, st] of Object.entries(all)) {
+    const p = wp(n); const col = MK_COL[st] || '#ffffff';
+    const strong = st !== 'idle';
+    const g = new THREE.Group(); g.position.set(p.x, p.y + 0.35, p.z);
+    const ringG = new THREE.RingGeometry(strong ? 3.6 : 3.2, strong ? 5.4 : 4.3, 48); ringG.rotateX(-Math.PI / 2);
+    const ring = new THREE.Mesh(ringG, new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: strong ? 0.95 : 0.75, depthTest: false, side: THREE.DoubleSide, fog: false }));
+    ring.renderOrder = 20; g.add(ring);
+    const discG = new THREE.CircleGeometry(strong ? 3.6 : 3.2, 40); discG.rotateX(-Math.PI / 2);
+    const disc = new THREE.Mesh(discG, new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: strong ? 0.28 : 0.12, depthTest: false, fog: false }));
+    disc.renderOrder = 19; g.add(disc);
+    if (st === 'move' || st === 'attack') {
+      // 目標點上方浮動的菱形指標（不做直衝天際的光柱）
+      const gem = new THREE.Mesh(new THREE.OctahedronGeometry(1.5), new THREE.MeshBasicMaterial({ color: col, depthTest: false, fog: false }));
+      gem.scale.set(1, 1.6, 1); gem.position.y = 6; gem.renderOrder = 21; g.add(gem);
+      bobbers.push({ gem, ring, base: 6 });
+    }
+    markLayer.add(g);
+  }
+  SCN.dirty();
+}
+// 點位與箭頭的動態（只在有東西要動時才持續重畫）
+const flows = [];
+(function anim(t) {
+  requestAnimationFrame(anim);
+  if (!bobbers.length && !flows.length) return;
+  const s = t / 1000;
+  for (const b of bobbers) {
+    b.ring.scale.setScalar(1 + 0.12 * Math.sin(s * 4));
+    if (b.gem) { b.gem.position.y = b.base + Math.sin(s * 3) * 0.8; b.gem.rotation.y = s * 1.5; }
+  }
+  for (const f of flows) f.chev.forEach((c, i) => { const u = ((s * 0.35 + i / f.chev.length) % 1); const k = Math.floor(u * (f.pts.length - 1)); c.position.copy(f.pts[k]); c.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), f.pts[Math.min(k + 1, f.pts.length - 1)].clone().sub(f.pts[Math.max(k - 1, 0)]).normalize()); });
+  SCN.dirty();
+})(0);
+// 學生只看本軍能走的點位
+const myNodes = side => NODE_IDS.filter(n => R.NODES[n].side === side || R.NODES[n].side === 'both');
 
 // 點選地圖上的點位
 let onNodeTap = null;
@@ -241,7 +294,7 @@ if (role === 'red' || role === 'blue') {
       for (const a of view.mine) mk[a.node] = 'here';
       if (sa) for (const o of R.legalOrders(null, sa)) if (o.to) mk[o.to] = o.type === 'strike' ? 'attack' : 'move';
     }
-    drawMarkers(mk);
+    drawMarkers(mk, view.status === 'playing' ? myNodes(side) : []);
     const lost = view.lost[side];
     const lim = Math.ceil(view.cfg.redUnits / 2);
     let h = `<div class="phead"><b>第 ${view.turn} 回合</b><span class="muted">已損 ${lost}${side === 'red' ? `／損 ${lim} 即敗` : ''}</span></div>`;
@@ -266,6 +319,7 @@ if (role === 'red' || role === 'blue') {
       }
     } else if (view.mine.length) h += '<div class="muted hint">點部隊（下方或地圖上）下令，沒下令的原地固守。</div>';
     h += `<button class="btn main" id="send">${sub ? '已送出（可修改再送）' : '送出本回合命令'}</button>`;
+    if (sub) h += `<div class="waitnote">命令已送達。<b>老師按下「結算本回合」後，雙方部隊才會同時行動</b>，在那之前部隊會留在原地。</div>`;
     $('#panel').innerHTML = h;
     resize();
     $('#panel').querySelectorAll('.chip').forEach(el => el.onclick = () => { sel = sel === el.dataset.id ? null : el.dataset.id; render(); if (sel) focusSel(); else focusMine(); });
@@ -292,7 +346,8 @@ if (role === 'ref') {
 
   topBar('<button id="hide">收合面板</button>');
   $('#ui').innerHTML = '<div id="refbox"></div>';
-  let game = null, ord = { red: null, blue: null }, hist = [], showQR = true;
+  let game = null, ord = { red: null, blue: null }, hist = [], showQR = true, autoRes = false, resolving = false;
+  try { autoRes = localStorage.getItem('hong-auto') === '1'; } catch (e) { }
   $('#hide').onclick = () => { const b = $('#refbox'); b.style.display = b.style.display === 'none' ? '' : 'none'; };
 
   const base = location.href.split('?')[0];
@@ -348,7 +403,8 @@ if (role === 'ref') {
       <div class="muted" style="word-break:break-all;margin-top:4px">房號 ${esc(room)}</div>`;
     h += `<div class="stat"><span class="${cur('red') ? 'ok' : ''}">楚軍${cur('red') ? '已下令' : '未下令'}</span><span class="${cur('blue') ? 'ok' : ''}">宋軍${cur('blue') ? '已下令' : '未下令'}</span></div>`;
     h += `<h4 style="color:var(--red)">楚軍命令</h4>${ordList('red')}<h4 style="color:var(--blue)">宋軍命令</h4>${ordList('blue')}`;
-    if (game.status === 'playing') h += `<button class="btn main" id="res" ${both ? '' : ''}>${both ? '結算本回合' : '結算本回合（未下令者原地固守）'}</button>`;
+    if (game.status === 'playing') h += `<button class="btn main" id="res">${both ? '結算本回合' : '結算本回合（未下令者原地固守）'}</button>
+      <label class="auto"><input type="checkbox" id="autoR" ${autoRes ? 'checked' : ''}> 雙方都送出命令後，3 秒自動結算</label>`;
     h += `<div class="row" style="margin-top:8px"><button class="btn" id="undo" ${hist.length ? '' : 'disabled'}>回上一回合</button><button class="btn" id="new">重新開局</button><button class="btn" id="lg">完整戰報</button></div>`;
     h += `<details style="margin-top:8px"><summary>參數設定（重新開局時套用）</summary>
       <div class="count">楚軍兵力 <input id="sRed" type="number" value="${game.cfg.redUnits}" min="2" max="12" style="width:60px"></div>
@@ -360,6 +416,11 @@ if (role === 'ref') {
     if (last) h += `<h4>最近戰報</h4>${logHtml([last])}`;
     $('#refbox').innerHTML = h;
     $('#qrt').onclick = () => { showQR = !showQR; render(); };
+    const ar = $('#autoR'); if (ar) ar.onchange = () => { autoRes = ar.checked; try { localStorage.setItem('hong-auto', autoRes ? '1' : '0'); } catch (e) { } render(); };
+    if (autoRes && both && game.status === 'playing' && !resolving) {
+      resolving = true; const t0 = game.turn;
+      setTimeout(async () => { if (game.turn === t0 && cur('red') && cur('blue')) await publish(R.resolveTurn(game, { ...cur('red').orders, ...cur('blue').orders })); resolving = false; }, 3000);
+    }
     $('#lg').onclick = () => modal(`<h2>完整戰報</h2>${logHtml(game.log)}`);
     const res = $('#res'); if (res) res.onclick = async () => {
       if (!both && !confirm('還有一方沒下令，未下令的部隊將原地固守。確定結算？')) return;
