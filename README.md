@@ -8,6 +8,12 @@
 - 學生：掃描自己隊伍的 QR 碼。
 - 投影幕：開「投影畫面」那個 QR 碼的網址。推演進行中只顯示回合數、哪一方已下令和戰報，不顯示兵力；結束後揭曉全部部隊位置。
 
+## 測試用固定房號
+
+- 老師：https://op06dhans-eng.github.io/hong-river-20261117/?role=ref&room=TEST
+- 紅軍：https://op06dhans-eng.github.io/hong-river-20261117/?role=red&room=TEST
+- 藍軍：https://op06dhans-eng.github.io/hong-river-20261117/?role=blue&room=TEST
+
 ## 規則摘要
 
 - 每回合每支部隊移動一格，可分兵。

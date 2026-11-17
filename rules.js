@@ -32,26 +32,26 @@ const RED_EDGES = [
   ['S', 'W1'], ['W1', 'W2'], ['W2', 'W3'], ['W3', 'W4'], ['W4', 'W5'], ['W5', 'H'],
   ['S', 'C1'], ['C1', 'C2'], ['C2', 'C3'], ['C3', 'H', 'C4'],
   ['C1', 'E1'], ['E1', 'E2'], ['E2', 'E3'], ['E3', 'E5', 'E4'], ['E5', 'H'],
-  // 紅軍被攔在藍方點位時的出路
-  ['C4', 'H'], ['C4', 'C3'], ['E4', 'E5'], ['E4', 'E3'],
 ];
+// 被攔在對方專用點位時的出路（單向：只能離開，不能走進去）
+const RED_EXIT = [['C4', 'H'], ['C4', 'C3'], ['E4', 'E5'], ['E4', 'E3']];
 const BLUE_EDGES = [
   ['H', 'W4', 'W5'], ['W4', 'W3'],
   ['H', 'C4'], ['C4', 'C3'],
   ['H', 'E4', 'E5'], ['E4', 'E3'],
-  // 藍軍被攔在紅方點位時的出路
-  ['W5', 'H'], ['W5', 'W4'], ['E5', 'H'], ['E5', 'E4'],
 ];
+const BLUE_EXIT = [['W5', 'H'], ['W5', 'W4'], ['E5', 'H'], ['E5', 'E4']];
 
-function buildAdj(edges) {
+function buildAdj(edges, exits) {
   const adj = {};
   for (const [a, b, via] of edges) {
     (adj[a] ||= {})[b] = via ? [a, via, b] : [a, b];
     (adj[b] ||= {})[a] = via ? [b, via, a] : [b, a];
   }
+  for (const [a, b] of exits) (adj[a] ||= {})[b] = [a, b];
   return adj;
 }
-export const ADJ = { red: buildAdj(RED_EDGES), blue: buildAdj(BLUE_EDGES) };
+export const ADJ = { red: buildAdj(RED_EDGES, RED_EXIT), blue: buildAdj(BLUE_EDGES, BLUE_EXIT) };
 export const EDGES = { red: RED_EDGES, blue: BLUE_EDGES };
 
 // 河岸點與對岸渡口（藍軍「出擊」用）
@@ -69,6 +69,8 @@ export const DEFAULTS = {
   redUnits: 6, blueUnits: 3, maxTurns: 12, sightRange: 2,
   disorderFactor: 0.5,   // 渡河中、未成列時的戰力倍數
   strikeBonus: 1.5,      // 藍軍打擊渡河中／未成列之敵的加成
+  prestige: 10,          // 藍軍國君聲望起始值
+  prestigeHit: 2,        // 藍軍主動攻擊渡河中／未成列之敵，每次交戰扣的聲望
 };
 
 export const STATE_LABEL = { formed: '已成列', crossing: '渡河中', disordered: '未成列' };
@@ -86,6 +88,7 @@ export function newGame(opts = {}) {
       { id: 'b1', side: 'blue', node: 'H', units: cfg.blueUnits, state: 'formed' },
     ],
     lost: { red: 0, blue: 0 },
+    prestige: cfg.prestige,
     seen: { red: {}, blue: {} },  // 各方記得的敵軍最後位置 { armyId: {node, units, turn} }
     log: [],
   };
@@ -108,7 +111,7 @@ export function legalOrders(game, army) {
     opts.push({ type: 'move', to, label: `移動到 ${NODES[to].name}` });
   }
   if (army.side === 'blue' && STRIKE[army.node]) {
-    opts.push({ type: 'strike', to: STRIKE[army.node], label: `出擊 ${NODES[STRIKE[army.node]].name}（半渡而擊）` });
+    opts.push({ type: 'strike', to: STRIKE[army.node], label: `出擊 ${NODES[STRIKE[army.node]].name}（半渡而擊，聲望 −${game?.cfg?.prestigeHit ?? 2}）` });
   }
   return opts;
 }
@@ -243,6 +246,13 @@ function fight(g, node, rs, bs, log) {
   const blueEff = blueUnits * (redWeak ? cfg.strikeBonus : 1);
   const head = `【${NODES[node].name}之戰】紅軍 ${redUnits}（${STATE_LABEL[redState]}，戰力 ${fmt(redEff)}）對藍軍 ${blueUnits}（戰力 ${fmt(blueEff)}${redWeak ? '，擊其不整 ×' + cfg.strikeBonus : ''}）。`;
   log.push(head);
+  // 聲望：藍軍主動出手（出擊渡口，或自己走進交戰點）攻擊渡河中／未成列的紅軍
+  const blueInit = bs.some(p => p.order.type === 'strike' || p.start !== node);
+  if (redWeak && blueInit) {
+    const hit = cfg.prestigeHit ?? 2;
+    g.prestige = Math.max(0, (g.prestige ?? cfg.prestige ?? 10) - hit);
+    log.push(`藍軍趁紅軍${redState === 'crossing' ? '渡河未畢' : '上岸未列陣'}而擊，諸侯議論藍君不仁：國君聲望 −${hit}（剩 ${g.prestige}）。`);
+  }
 
   let winner, ratio;
   if (redEff > blueEff) { winner = 'red'; ratio = redEff / blueEff; }
@@ -339,7 +349,7 @@ function checkEnd(g, log) {
   else if (!blue.length) { g.status = 'red_win'; g.result = '藍軍全軍覆沒，紅軍勝。'; }
   else if (g.lost.red >= Math.ceil(g.cfg.redUnits / 2)) { g.status = 'blue_win'; g.result = `紅軍折損過半（${g.lost.red}／${g.cfg.redUnits}），藍軍勝。`; }
   else if (g.turn >= g.cfg.maxTurns) { g.status = 'blue_win'; g.result = `${g.cfg.maxTurns} 回合內紅軍未能攻入，藍軍守住國都。`; }
-  if (g.status !== 'playing') log.push(g.result);
+  if (g.status !== 'playing') { g.result += `藍軍國君聲望 ${g.prestige ?? 10}／${g.cfg.prestige ?? 10}。`; log.push(g.result); }
 }
 
 // 給某一方看的畫面資料（裁判寫入，學生只讀自己這份）
@@ -352,6 +362,7 @@ export function viewFor(g, side) {
     enemies: g.armies.filter(a => vis.includes(a.id)),
     ghosts: Object.entries(g.seen[side]).filter(([id]) => !vis.includes(id)).map(([id, r]) => ({ id, ...r })),
     lost: g.lost,
+    prestige: side === 'blue' || g.status !== 'playing' ? g.prestige : undefined,
     log: g.log.filter(l => true).map(l => ({ turn: l.turn, lines: l.lines.filter(t => relevant(t, g, side, vis)) })).filter(l => l.lines.length),
   };
 }

@@ -235,7 +235,13 @@ const REVEAL = `<div class="reveal"><h2>揭曉：這是泓之戰</h2>
   <p>西元前 638 年（魯僖公二十二年），楚國伐宋以救鄭，宋襄公迎戰於泓水。<b>紅軍是楚，藍軍是宋，藍軍國君就是宋襄公。</b></p>
   <p class="yw">「宋人既成列，楚人未既濟。司馬曰：『彼眾我寡，及其未既濟也，請擊之。』公曰：『不可。』既濟而未成列，又以告。公曰：『未可。』既陳而後擊之，宋師敗績。」（《左傳・僖公二十二年》）</p>
   <p class="muted">白話：宋軍已經列好陣，楚軍還沒渡完河。司馬子魚說：「敵眾我寡，趁他們還沒渡完，請下令攻擊。」襄公說：「不行。」楚軍渡完河還沒列陣，子魚又請戰，襄公說：「還不行。」等楚軍列好陣才進攻，宋軍大敗。</p>
-  <p>想一想：剛才你們的藍軍，在哪一刻出手？和宋襄公的選擇一樣嗎？</p></div>`;
+  <p>想一想：剛才你們的藍軍在哪一刻出手？和宋襄公的選擇一樣嗎？如果「打贏」和「聲望滿分」只能選一個，你會選哪個？宋襄公又為什麼這樣選？</p></div>`;
+// 聲望條（十格）
+function prestigeBar(p, max = 10) {
+  let h = '<span class="pbar" title="藍軍國君聲望">';
+  for (let i = 0; i < max; i++) h += `<i class="${i < p ? (p <= 6 ? 'on low' : 'on') : ''}"></i>`;
+  return h + `</span><b class="pnum ${p <= 6 ? 'low' : ''}">聲望 ${p}／${max}</b>`;
+}
 function logHtml(log, fromTurn = 0) {
   return log.filter(l => l.turn >= fromTurn).map(l => `<div class="log-turn">第 ${l.turn} 回合</div>${l.lines.map(x => `<p>${esc(x)}</p>`).join('')}`).join('') || '<p class="muted">尚無紀錄。</p>';
 }
@@ -274,7 +280,8 @@ if (role === 'red' || role === 'blue') {
     <p>• 只看得到同一條路線上相距兩格以內的紅軍。</p>
     <p>• 紅軍在河中或上岸未成列時，戰力只剩一半，而你打擊這種敵人戰力 ×1.5。站在河岸點可以「出擊」對岸渡口。</p>
     <p>• 紅軍列好陣後與你正面交戰，你幾乎必敗。</p>
-    <p>• 讓紅軍折損 3 個單位，或守住 12 回合，即勝。</p>`);
+    <p>• 讓紅軍折損 3 個單位，或守住 12 回合，即勝。</p>
+    <p>• <b>聲望</b>：你是以諸侯盟主自居的國君，聲望滿分 10。<b>主動攻擊</b>還在渡河、或上岸還沒列陣的紅軍（例如「出擊」渡口，或走進他們所在的點位），就算打贏，也會被諸侯議論不仁，每次交戰聲望 −2。紅軍自己衝上你守住的河岸則不扣。結算時同時看<b>戰果</b>與<b>聲望</b>。</p>`);
   $('#helpb').onclick = showHelp;
   try { if (!localStorage.getItem('hong-help-' + side)) { localStorage.setItem('hong-help-' + side, '1'); setTimeout(showHelp, 400); } } catch (e) { }
 
@@ -323,6 +330,7 @@ if (role === 'red' || role === 'blue') {
     const lost = view.lost[side];
     const lim = Math.ceil(view.cfg.redUnits / 2);
     let h = `<div class="phead"><b>第 ${view.turn} 回合</b><span class="muted">已損 ${lost}${side === 'red' ? `／損 ${lim} 即敗` : ''}</span></div>`;
+    if (side === 'blue' && view.prestige != null) h += `<div class="prest">${prestigeBar(view.prestige, view.cfg.prestige ?? 10)}</div>`;
     if (view.status !== 'playing') {
       h += `<p><b>${esc(view.result)}</b></p><p class="muted">推演結束。請看老師的投影畫面。</p>`;
       $('#panel').innerHTML = h; resize(); return;
@@ -336,7 +344,7 @@ if (role === 'red' || role === 'blue') {
     h += '</div>';
     if (sa) {
       const o = draft[sa.id] || { type: 'hold' };
-      const short = x => x.type === 'hold' ? '固守' : x.type === 'regroup' ? '重新列陣' : x.type === 'strike' ? `出擊${R.NODES[x.to].name}` : `→ ${R.NODES[x.to].name}`;
+      const short = x => x.type === 'hold' ? '固守' : x.type === 'regroup' ? '重新列陣' : x.type === 'strike' ? `出擊${R.NODES[x.to].name}（聲望−${view.cfg.prestigeHit ?? 2}）` : `→ ${R.NODES[x.to].name}`;
       h += `<div class="opts">${R.legalOrders(null, sa).map((x, i) => `<button data-i="${i}" class="${x.type === o.type && x.to === o.to ? 'on' : ''} ${x.type === 'strike' ? 'strike' : ''}">${esc(short(x))}</button>`).join('')}</div>`;
       if ((o.type === 'move' || o.type === 'strike') && sa.units > 1) {
         const c = o.count || sa.units;
@@ -421,7 +429,7 @@ if (role === 'ref') {
     };
     const both = cur('red') && cur('blue');
     let h = '';
-    h += `<div class="row" style="justify-content:space-between"><b style="font-size:18px">第 ${game.turn} 回合</b><span class="muted">紅損 ${game.lost.red}／藍損 ${game.lost.blue}</span></div>`;
+    h += `<div class="row" style="justify-content:space-between"><b style="font-size:18px">第 ${game.turn} 回合</b><span class="muted">紅損 ${game.lost.red}／藍損 ${game.lost.blue}</span></div><div class="prest">${prestigeBar(game.prestige ?? 10, game.cfg.prestige ?? 10)}</div>`;
     if (game.status !== 'playing') h += `<p style="font-weight:700;color:var(--red)">${esc(game.result)}</p>${REVEAL}`;
     h += `<h4>學生入口 <button class="btn" id="qrt" style="padding:2px 8px;font-size:12px">${showQR ? '隱藏' : '顯示'}</button></h4>`;
     if (showQR) h += `<div class="qrs"><div>${qr(link('red'))}<br><b style="color:var(--red)">紅軍</b></div><div>${qr(link('blue'))}<br><b style="color:var(--blue)">藍軍</b></div><div>${qr(link('screen'))}<br><b>投影畫面</b></div></div>
@@ -436,7 +444,8 @@ if (role === 'ref') {
       <div class="count">藍軍兵力 <input id="sBlue" type="number" value="${game.cfg.blueUnits}" min="1" max="9" style="width:60px"></div>
       <div class="count">回合上限 <input id="sMax" type="number" value="${game.cfg.maxTurns}" min="4" max="30" style="width:60px"></div>
       <div class="count">擊其不整加成 <input id="sBonus" type="number" step="0.25" value="${game.cfg.strikeBonus}" min="1" max="3" style="width:70px"></div>
-      <div class="count">發現距離 <input id="sSight" type="number" value="${game.cfg.sightRange}" min="1" max="4" style="width:60px"> 格</div></details>`;
+      <div class="count">發現距離 <input id="sSight" type="number" value="${game.cfg.sightRange}" min="1" max="4" style="width:60px"> 格</div>
+      <div class="count">聲望每次扣 <input id="sPH" type="number" value="${game.cfg.prestigeHit ?? 2}" min="0" max="5" style="width:60px"> 點</div></details>`;
     const last = game.log.at(-1);
     if (last) h += `<h4>最近戰報</h4>${logHtml([last])}`;
     $('#refbox').innerHTML = h;
@@ -463,7 +472,7 @@ if (role === 'ref') {
       const n = id => +$(id).value;
       hist = [];
       await be.set('orders/red', null); await be.set('orders/blue', null);
-      await publish(R.newGame({ redUnits: n('#sRed'), blueUnits: n('#sBlue'), maxTurns: n('#sMax'), strikeBonus: n('#sBonus'), sightRange: n('#sSight') }), false);
+      await publish(R.newGame({ redUnits: n('#sRed'), blueUnits: n('#sBlue'), maxTurns: n('#sMax'), strikeBonus: n('#sBonus'), sightRange: n('#sSight'), prestigeHit: n('#sPH') }), false);
     };
   }
 }

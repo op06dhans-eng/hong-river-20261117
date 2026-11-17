@@ -1,5 +1,5 @@
 import { newGame, resolveTurn, viewFor } from './rules.js';
-const show = (g, t) => { console.log('==', t, '| turn', g.turn, g.status, g.result); console.log(' ', g.armies.map(a => `${a.id}:${a.side}@${a.node}x${a.units}(${a.state})`).join('  ')); console.log('  log:', g.log.at(-1).lines.join(' / ')); };
+const show = (g, t) => { console.log('==', t, '| turn', g.turn, g.status, g.result, '| 聲望', g.prestige); console.log(' ', g.armies.map(a => `${a.id}:${a.side}@${a.node}x${a.units}(${a.state})`).join('  ')); console.log('  log:', g.log.at(-1).lines.join(' / ')); };
 function run(title, steps) {
   console.log('\n######', title);
   let g = newGame();
