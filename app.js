@@ -87,12 +87,31 @@ controls.screenSpacePanning = false;
 controls.touches = { ONE: THREE.TOUCH.PAN, TWO: THREE.TOUCH.DOLLY_ROTATE };
 controls.mouseButtons = { LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.ROTATE };
 
-function resetCamera() {
-  const portrait = innerHeight > innerWidth;
-  camera.position.set(0, portrait ? 14 : 8.5, portrait ? 9.5 : 6.5);
-  controls.target.set(0, 0, portrait ? 1.8 : 0.4);
-  controls.update();
+const VIEW_DIR = new THREE.Vector3(0, 0.83, 0.56).normalize();
+let fly = null;
+controls.addEventListener('start', () => { fly = null; });
+function flyTo(center, dist, instant) {
+  fly = { t: center.clone(), d: dist };
+  if (instant) { controls.target.copy(fly.t); camera.position.copy(fly.t).addScaledVector(VIEW_DIR, dist); fly = null; controls.update(); }
 }
+// 讓一組點位剛好塞進畫面
+function focusNodes(ids, instant, minD = 4.2) {
+  if (!ids.length) return;
+  const ps = ids.map(pos);
+  const min = ps.reduce((m, p) => m.min(p), ps[0].clone()), max = ps.reduce((m, p) => m.max(p), ps[0].clone());
+  const c = min.clone().add(max).multiplyScalar(0.5);
+  const w = max.x - min.x + 1.6, h = (max.z - min.z) * 0.75 + 1.6;
+  const k = 2 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
+  const d = Math.max(minD, h / k, w / (k * camera.aspect));
+  const D = Math.min(d, 18);
+  // 不讓鏡頭照到地圖板外的空白
+  c.z = Math.min(c.z, 4.15 - 0.36 * D);
+  const hw = Math.max(0, 7.37 - 0.36 * D * camera.aspect);
+  c.x = Math.max(-hw, Math.min(hw, c.x));
+  flyTo(c, D, instant);
+}
+const ALL_NODES = Object.keys(R.NODES);
+function resetCamera(instant) { focusNodes(ALL_NODES, instant, 3); }
 
 scene.add(new THREE.HemisphereLight('#fff6e0', '#4a3a28', 1.1));
 const sun = new THREE.DirectionalLight('#fff1d6', 1.6);
@@ -265,15 +284,27 @@ renderer.domElement.addEventListener('pointerup', e => {
 });
 let onPickTarget, onPickArmy, onPickNone;
 
+const SIDE_MQ = matchMedia('(orientation: landscape) and (max-height: 520px)');
 function resize() {
-  renderer.setSize(innerWidth, innerHeight); labelR.setSize(innerWidth, innerHeight);
-  camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
+  const p = document.getElementById('panel');
+  host.style.bottom = host.style.right = '0px';
+  if (p) { if (SIDE_MQ.matches) host.style.right = p.offsetWidth + 'px'; else host.style.bottom = p.offsetHeight + 'px'; }
+  const w = host.clientWidth, h = host.clientHeight;
+  renderer.setSize(w, h); labelR.setSize(w, h);
+  camera.aspect = w / h; camera.updateProjectionMatrix();
 }
-addEventListener('resize', resize); resize(); resetCamera();
+addEventListener('resize', resize); resize(); resetCamera(true);
+new ResizeObserver(() => resize()).observe(document.body);
 const clock = new THREE.Clock();
 renderer.setAnimationLoop(() => {
   const t = clock.getElapsedTime(), dt = Math.min(clock.getDelta(), 0.05);
   for (const rec of tokens.values()) rec.group.position.lerp(rec.target, 0.08);
+  if (fly) {
+    controls.target.lerp(fly.t, 0.12);
+    const want = fly.t.clone().addScaledVector(VIEW_DIR, fly.d);
+    camera.position.lerp(want, 0.12);
+    if (camera.position.distanceTo(want) < 0.01) fly = null;
+  }
   pickLayer.children.forEach(m => m.scale.setScalar(1 + 0.12 * Math.sin(t * 5)));
   controls.update(); renderer.render(scene, camera); labelR.render(scene, camera);
 });
@@ -282,8 +313,8 @@ renderer.setAnimationLoop(() => {
 function topBar(extra = '') {
   $('#top').innerHTML = `<span class="side ${role === 'red' || role === 'blue' ? role : 'ref'}">${SIDE_NAME[role]}</span>
     <span class="room">房號 <b>${esc(room)}</b></span><span class="grow"></span>${extra}
-    <button id="cam">視角歸位</button>`;
-  $('#cam').onclick = resetCamera;
+    <button id="cam">全圖</button>`;
+  $('#cam').onclick = () => resetCamera();
 }
 function modal(html, onClose) {
   const m = document.createElement('div'); m.className = 'modal';
@@ -309,11 +340,14 @@ if (be.mode === 'local') document.body.insertAdjacentHTML('beforeend', `<div id=
 // ====================== 學生（紅／藍） ======================
 if (role === 'red' || role === 'blue') {
   const side = role;
+  document.body.classList.add(side);
   drawNodes(side);
-  topBar('<button id="logb">戰報</button><button id="helpb">規則</button>');
+  topBar('<button id="logb">戰報</button><button id="helpb">規則</button><button id="mineb">我軍</button>');
   $('#ui').innerHTML = '<div id="panel"><div class="muted">連線中…</div></div>';
   let view = null, draft = {}, sel = null, submitted = null, lastTurn = null;
 
+  const focusMine = instant => view && focusNodes(view.mine.flatMap(a => [a.node, ...Object.keys(R.ADJ[side][a.node] || {})]), instant);
+  $('#mineb').onclick = () => focusMine();
   $('#logb').onclick = () => view && modal(`<h2>戰報</h2>${logHtml(view.log)}`);
   $('#helpb').onclick = () => modal(side === 'red' ? `<h2>楚軍須知</h2>
     <p>你率楚軍 6 個步兵單位自南方來，必須渡過南河，攻入宋營即勝。</p>
@@ -335,8 +369,10 @@ if (role === 'red' || role === 'blue') {
     const ended = v.status !== 'playing' && view?.status === 'playing';
     if (newTurn) { draft = {}; sel = null; }
     const prevTurn = lastTurn;
+    const first = !view;
     view = v; lastTurn = v.turn;
     render();
+    if (first || newTurn) focusMine(first);
     if (ended) modal(`<h2>${esc(v.result)}</h2><p class="muted">地圖上已顯示敵軍全部位置。</p>${logHtml(v.log, (prevTurn ?? v.turn))}`);
     else if (newTurn) {
       const rep = v.log.filter(l => l.turn === prevTurn);
@@ -345,7 +381,8 @@ if (role === 'red' || role === 'blue') {
   });
   be.on(`orders/${side}`, v => { v = parse(v); submitted = v && view && v.turn === view.turn ? v : (v && !view ? v : null); render(); });
 
-  onPickArmy = ud => { if (!ud.ghost && ud.army.side === side && view?.status === 'playing') { sel = ud.army.id; render(); } };
+  const focusSel = () => { const a = view.mine.find(x => x.id === sel); if (a) focusNodes([a.node, ...Object.keys(R.ADJ[side][a.node] || {})]); };
+  onPickArmy = ud => { if (!ud.ghost && ud.army.side === side && view?.status === 'playing') { sel = ud.army.id; render(); focusSel(); } };
   onPickTarget = ud => { const a = view.mine.find(x => x.id === sel); draft[sel] = { ...ud.order, count: draft[sel]?.count && draft[sel].type === ud.order.type ? draft[sel].count : a.units }; render(); };
   onPickNone = () => { sel = null; render(); };
 
@@ -357,30 +394,32 @@ if (role === 'red' || role === 'blue') {
     drawArrows(view.mine.filter(a => draft[a.id] && draft[a.id].to).map(a => ({ from: a.node, to: draft[a.id].to, side, strike: draft[a.id].type === 'strike' })));
     drawTargets(sa && view.status === 'playing' ? R.legalOrders(null, sa).filter(o => o.to).map(o => ({ node: o.to, order: o })) : []);
     const lost = view.lost[side];
-    let h = `<h3>第 ${view.turn} 回合 <span class="muted">已損 ${lost} 個單位${side === 'red' ? `（損 ${Math.ceil(view.cfg.redUnits / 2)} 即敗）` : ''}</span></h3>`;
+    const lim = Math.ceil(view.cfg.redUnits / 2);
+    let h = `<div class="phead"><b>第 ${view.turn} 回合</b><span class="muted">已損 ${lost}${side === 'red' ? `／損 ${lim} 即敗` : ''}</span></div>`;
     if (view.status !== 'playing') {
       h += `<p><b>${esc(view.result)}</b></p><p class="muted">推演結束。請看老師的投影畫面。</p>`;
-      $('#panel').innerHTML = h; return;
+      $('#panel').innerHTML = h; resize(); return;
     }
+    h += '<div class="chips">';
     for (const a of view.mine) {
-      const st = side === 'red' ? `<span class="badge ${a.state !== 'formed' ? 'warn' : ''}">${R.STATE_LABEL[a.state]}</span>` : '';
-      h += `<div class="army ${a.id === sel ? 'sel' : ''}" data-id="${a.id}"><span class="dot" style="background:${COLORS[side]}"></span>
-        <div class="info"><b>${armyName(a, view.mine)}</b> ${a.units} 單位 · ${R.NODES[a.node].name}${st}<div class="ord">命令：${orderText(draft[a.id], a)}</div></div></div>`;
-      if (a.id === sel) {
-        const o = draft[a.id] || { type: 'hold' };
-        h += `<div class="opts">${R.legalOrders(null, a).map((x, i) => `<button data-i="${i}" class="${x.type === o.type && x.to === o.to ? 'on' : ''}">${esc(x.label)}</button>`).join('')}</div>`;
-        if ((o.type === 'move' || o.type === 'strike') && a.units > 1) {
-          const c = o.count || a.units;
-          h += `<div class="count">派出 <button data-c="-1">－</button><b>${c}</b><button data-c="1">＋</button> 個單位 <span class="muted">${c < a.units ? `（其餘 ${a.units - c} 個留守）` : '（全軍）'}</span></div>`;
-        }
-        h += `<div class="muted">也可以直接點地圖上閃爍的黃圈。</div>`;
-      }
+      const st = side === 'red' && a.state !== 'formed' ? `<span class="badge warn">${R.STATE_LABEL[a.state]}</span>` : '';
+      h += `<div class="chip ${a.id === sel ? 'sel' : ''}" data-id="${a.id}"><b>${armyName(a, view.mine)}</b> ${a.units}${st}<br><span class="where">${R.NODES[a.node].name}</span><span class="ord">→ ${orderText(draft[a.id], a)}</span></div>`;
     }
-    if (!view.mine.length) h += '<p class="muted">你已沒有部隊。</p>';
-    h += `<button class="btn main" id="send">${sub ? '已送出，可修改後再次送出' : '送出本回合命令'}</button>`;
-    h += `<div class="muted" style="margin-top:6px">${sub ? '等待對方下令，由老師結算。' : '點選部隊下令；沒下令的部隊原地固守。'}</div>`;
+    if (!view.mine.length) h += '<span class="muted">你已沒有部隊。</span>';
+    h += '</div>';
+    if (sa) {
+      const o = draft[sa.id] || { type: 'hold' };
+      const short = x => x.type === 'hold' ? '固守' : x.type === 'regroup' ? '重新列陣' : x.type === 'strike' ? `出擊${R.NODES[x.to].name}` : `→ ${R.NODES[x.to].name}`;
+      h += `<div class="opts">${R.legalOrders(null, sa).map((x, i) => `<button data-i="${i}" class="${x.type === o.type && x.to === o.to ? 'on' : ''} ${x.type === 'strike' ? 'strike' : ''}">${esc(short(x))}</button>`).join('')}</div>`;
+      if ((o.type === 'move' || o.type === 'strike') && sa.units > 1) {
+        const c = o.count || sa.units;
+        h += `<div class="count">派出 <button data-c="-1">－</button><b>${c}</b><button data-c="1">＋</button> <span class="muted">${c < sa.units ? `其餘 ${sa.units - c} 留守` : '全軍'}</span></div>`;
+      }
+    } else if (view.mine.length) h += '<div class="muted hint">點部隊（下方或地圖上）下令，沒下令的原地固守。</div>';
+    h += `<button class="btn main" id="send">${sub ? '已送出（可修改再送）' : '送出本回合命令'}</button>`;
     $('#panel').innerHTML = h;
-    $('#panel').querySelectorAll('.army').forEach(el => el.onclick = () => { sel = sel === el.dataset.id ? null : el.dataset.id; render(); });
+    resize();
+    $('#panel').querySelectorAll('.chip').forEach(el => el.onclick = () => { sel = sel === el.dataset.id ? null : el.dataset.id; render(); if (sel) focusSel(); else focusMine(); });
     $('#panel').querySelectorAll('.opts button').forEach(el => el.onclick = () => {
       const x = R.legalOrders(null, sa)[+el.dataset.i];
       draft[sa.id] = x.type === 'hold' ? undefined : { type: x.type, to: x.to, count: sa.units };

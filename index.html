@@ -33,8 +33,26 @@
     background:rgba(244,236,216,.92);color:var(--ink)}
 
   /* 底部面板 */
-  #panel{position:fixed;left:0;right:0;bottom:0;max-height:52vh;overflow:auto;background:var(--paper);
-    border-top:3px solid var(--gold);padding:10px 12px 14px;z-index:5;box-shadow:0 -4px 16px rgba(0,0,0,.35)}
+  #scene{bottom:0;right:0}
+  #panel{position:fixed;left:0;right:0;bottom:0;max-height:42vh;overflow:auto;background:var(--paper);
+    border-top:3px solid var(--gold);padding:8px 10px calc(10px + env(safe-area-inset-bottom));z-index:5;box-shadow:0 -4px 16px rgba(0,0,0,.35)}
+  .phead{display:flex;justify-content:space-between;align-items:baseline;font-size:15px;margin-bottom:6px}
+  .chips{display:flex;gap:6px;overflow-x:auto;padding-bottom:2px}
+  .chip{flex:0 0 auto;padding:6px 10px;border:1px solid var(--line);border-radius:10px;background:#fffaf0;font-size:13px;line-height:1.45;
+    border-left:5px solid var(--red)}
+  body.blue .chip{border-left-color:var(--blue)}
+  .chip.sel{outline:3px solid var(--gold)}
+  .chip .where{color:#7a6a50} .chip .ord{color:#6b4e1f;margin-left:6px}
+  .opts{flex-wrap:nowrap!important;overflow-x:auto;padding-bottom:2px}
+  .opts button{flex:0 0 auto;font-size:14px!important;padding:8px 11px!important}
+  .opts button.strike{border-color:#ff8a00;color:#b35a00}
+  .hint{margin:6px 0 0}
+  #panel .btn.main{padding:10px;margin-top:8px}
+  #panel .count{margin:6px 0 0}
+  @media (orientation: landscape) and (max-height: 520px){
+    #panel{left:auto;top:0;width:min(320px,42vw);max-height:none;border-top:none;border-left:3px solid var(--gold);padding-top:48px}
+    .chips{flex-direction:column;overflow:visible} .opts{flex-wrap:wrap!important}
+  }
   #panel h3{margin:2px 0 8px;font-size:16px}
   .army{display:flex;align-items:center;gap:8px;padding:8px;border:1px solid var(--line);border-radius:8px;margin-bottom:6px;background:#fffaf0}
   .army.sel{outline:3px solid var(--gold)}
