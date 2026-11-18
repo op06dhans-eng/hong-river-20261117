@@ -526,7 +526,7 @@ const PLACES = [
 ];
 const labels = [];
 const labLayer = $('#labels');
-function mkLabel(text, cls, prio, pos) { const d = document.createElement('div'); d.className = 'lab ' + cls; d.textContent = text; labLayer.appendChild(d); const L = { d, prio, pos, text, cls, show: true }; labels.push(L); return L; }
+function mkLabel(text, cls, prio, pos) { const d = document.createElement('div'); d.className = 'lab ' + cls; d.textContent = text; d.style.display = 'none'; labLayer.appendChild(d); const L = { d, prio, pos, text, cls, show: true }; labels.push(L); return L; }
 for (const p of PLACES) mkLabel(p[0], p[5] || 'place', p[4], new THREE.Vector3(p[1], H(p[1], p[2]) + p[3], p[2]));
 const _v = new THREE.Vector3();
 function layoutLabels() {

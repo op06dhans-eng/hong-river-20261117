@@ -1,4 +1,4 @@
-import * as R from './rules.js?v=8';
+import * as R from './rules.js?v=9';
 
 const $ = s => document.querySelector(s);
 const params = new URLSearchParams(location.search);
@@ -94,7 +94,7 @@ function resetCamera(instant) { focusNodes(NODE_IDS, instant); }
 // 步卒與戰車模型移植自《陣法立體版》。每個兵力單位畫 12 名步卒，每支部隊前面一乘將車（圖示，算法等同步兵）
 const PER_UNIT = 12;
 function infOffs(n, disorder) {
-  const cols = Math.min(12, n), out = [];
+  const cols = Math.min(8, n), out = [];
   for (let i = 0; i < n; i++) {
     const r = Math.floor(i / cols), inRow = Math.min(cols, n - r * cols), c = i % cols;
     const j = disorder ? 0.55 : 0.08, h = k => { const v = Math.sin(i * 12.9898 + k * 78.233) * 43758.5453; return (v - Math.floor(v) - .5) * 2 * j; };
@@ -106,7 +106,7 @@ function tok(a, kind, animate) {
   const ch = a.side === 'red' ? '紅' : '藍';
   const weak = a.side === 'red' && a.state && a.state !== 'formed';
   const ghost = kind === 'ghost', fallen = kind === 'fallen';
-  const label = ghost ? `${ch} ${a.units}？ 第${a.turn}回合目擊` : fallen ? `${ch} ${a.units} 潰散` : `${ch} ${a.units}${weak ? ' ' + R.STATE_LABEL[a.state] : ''}`;
+  const label = ghost ? `${ch} ${a.units}？ 第${a.turn}回合目擊` : fallen ? `${ch} ${a.units} 潰散` : `${ch} ${a.units}${a.tag ? ' ' + a.tag : ''}${weak ? ' ' + R.STATE_LABEL[a.state] : ''}`;
   const trail = animate && !ghost && a.trail && a.trail.length > 1 ? a.trail : null;
   return {
     key: (ghost ? 'g' : 'a') + a.id, side: a.side, type: 'zinf_' + a.side, s: a.units * 100 + (weak ? 1 : 0), pos: { n: a.node },
@@ -165,8 +165,10 @@ function drawMarkers(map) {
   SCN.dirty();
 }
 // items: [{ from, to, side, strike }]
+const arrowLabs = [];
 function drawArrows(items) {
   clearLayer(arrowLayer); flows.length = 0;
+  for (const L of arrowLabs.splice(0)) { L.d.remove(); const i = SCN.labels.indexOf(L); if (i >= 0) SCN.labels.splice(i, 1); }
   const flat = c => new THREE.MeshBasicMaterial({ color: c, depthTest: false, fog: false });
   for (const it of items) {
     if (!R.NODES[it.from] || !R.NODES[it.to]) continue;
@@ -190,6 +192,7 @@ function drawArrows(items) {
     const chev = [];
     for (let i = 0; i < 4; i++) { const c = new THREE.Mesh(new THREE.ConeGeometry(1.0, 2.2, 10), flat('#ffffff')); c.renderOrder = 24; g.add(c); chev.push(c); }
     flows.push({ pts: curve.getPoints(80), chev });
+    if (it.text) { const L = SCN.mkLabel(it.text, 'arrow ' + (it.strike ? 'strike' : it.side), 8, pts[14].clone()); L.must = true; L.d.style.display = 'none'; arrowLabs.push(L); }
     arrowLayer.add(g);
   }
   SCN.dirty();
@@ -270,11 +273,17 @@ function prestigeBar(p, max) {
 function logHtml(log) {
   return log.map(l => `<div class="log-turn">第 ${l.turn} 回合</div>${l.lines.map(x => `<p>${esc(x.t ?? x)}</p>`).join('')}`).join('') || '<p class="muted">尚無紀錄。</p>';
 }
-function orderText(o, a) {
-  if (!o || o.type === 'hold') return '原地固守';
-  if (o.type === 'regroup') return '重新列陣';
-  const n = o.count && o.count < a.units ? `（派 ${o.count}，留 ${a.units - o.count}）` : '';
-  return (o.type === 'strike' ? `出擊${NN(o.to)}` : `前往${NN(o.to)}`) + n;
+function orderText(raw, a) {
+  const { movers, stay, regroup } = R.parseOrders(a, raw);
+  if (!movers.length) return regroup ? '重新列陣' : '原地固守';
+  const one = m => (m.type === 'strike' ? `出擊${NN(m.to)}` : `前往${NN(m.to)}`);
+  if (movers.length === 1 && !stay) return one(movers[0]);
+  return [...movers.map(m => `${m.count} 個單位${one(m)}`), ...(stay ? [`${stay} 個單位${regroup ? '重新列陣' : '留守'}`] : [])].join('；');
+}
+// 把一支部隊的命令變成地圖上的箭頭
+function orderArrows(a, raw, side) {
+  const { movers, stay } = R.parseOrders(a, raw), split = movers.length > 1 || stay > 0;
+  return movers.map(m => ({ from: a.node, to: m.to, side, strike: m.type === 'strike', text: split ? `${m.count} 個單位` : '' }));
 }
 const stBadge = a => a.side === 'red' ? `<span class="badge ${a.state !== 'formed' ? 'warn' : ''}">${R.STATE_LABEL[a.state]}</span>` : '';
 // 推演結束才揭曉是哪一場戰役
@@ -310,7 +319,30 @@ if (role === 'red' || role === 'blue') {
   topBar('<button id="logb">戰報</button><button id="helpb">規則</button><button id="mineb">我軍</button>');
   $('#ui').innerHTML = '<div id="panel"><div class="muted">連線中…</div></div>';
   dockWatch.observe($('#panel'));
-  let view = null, draft = {}, sel = null, submitted = null, pendingT = 0, helped = false;
+  // draft[部隊] = [{ n, type, to }]：這支部隊分成幾隊、每隊幾個單位、各自的命令；沒有紀錄＝整支固守
+  let view = null, draft = {}, sel = null, selG = 0, submitted = null, pendingT = 0, helped = false, shownKey = '';
+  const TEAM = ['甲', '乙', '丙', '丁'];
+
+  const groups = a => draft[a.id] || [{ n: a.units, type: 'hold' }];
+  const isSplit = a => groups(a).length > 1;
+  const toOrders = () => {   // 送給裁判的格式
+    const out = {};
+    for (const a of view.mine) {
+      const list = groups(a).filter(g => g.type !== 'hold').map(g => (g.type === 'regroup' ? { type: 'regroup' } : { type: g.type, to: g.to, count: g.n }));
+      if (list.length) out[a.id] = list;
+    }
+    return out;
+  };
+  const fromOrders = orders => {   // 重新整理頁面後，把已送出的命令還原成分隊
+    const d = {};
+    for (const a of view.mine) {
+      const { movers, stay, regroup } = R.parseOrders(a, orders?.[a.id]);
+      if (!movers.length && !regroup) continue;
+      d[a.id] = [...movers.map(m => ({ n: m.count, type: m.type, to: m.to })), ...(stay ? [{ n: stay, type: regroup ? 'regroup' : 'hold' }] : [])];
+    }
+    return d;
+  };
+  const gText = g => g.type === 'hold' ? '原地固守' : g.type === 'regroup' ? '重新列陣' : g.type === 'strike' ? `出擊${NN(g.to)}` : `前往${NN(g.to)}`;
 
   const reach = a => [a.node, ...R.legalOrders(null, a).filter(o => o.to).map(o => o.to)];
   const focusMine = instant => view && view.mine.length && focusNodes(view.mine.flatMap(reach), instant);
@@ -320,6 +352,13 @@ if (role === 'red' || role === 'blue') {
   $('#logb').onclick = () => view && modal(`<h2>戰報</h2>${logHtml(view.log)}`);
   $('#helpb').onclick = showHelp;
 
+  // 地圖上的部隊：分了隊的部隊，每一隊各畫一個方陣並排，標上隊名
+  function sceneData() {
+    const mine = view.status !== 'playing' ? view.mine : view.mine.flatMap(a => !isSplit(a) ? [a] : groups(a).map((g, i) => ({ ...a, id: `${a.id}#${i}`, units: g.n, tag: TEAM[i] + '隊', trail: null })));
+    return { armies: [...mine, ...view.enemies], ghosts: view.ghosts.map(gh => ({ ...gh, side: side === 'red' ? 'blue' : 'red' })), fallen: view.fallen };
+  }
+  const splitKey = () => (view.status === 'playing' ? view.mine.filter(isSplit).map(a => a.id + ':' + groups(a).map(g => g.n).join('/')).join(',') : '');
+
   be.on(`view/${side}`, v => {
     v = parse(v);
     if (!v || v.ver !== R.VERSION) { $('#panel').innerHTML = '<div class="muted">等待老師開局…（如果老師已經開局，請重新整理這個頁面）</div>'; resize(); return; }
@@ -327,9 +366,10 @@ if (role === 'red' || role === 'blue') {
     const first = !prev;
     const rewound = prev && (v.turn < prev.turn || (prev.status !== 'playing' && v.status === 'playing'));
     const advanced = prev && !rewound && (v.turn > prev.turn || (prev.status === 'playing' && v.status !== 'playing'));
-    if (first || rewound || advanced) { draft = {}; sel = null; }
-    if (submitted && submitted.turn === v.turn && v.status === 'playing' && !Object.keys(draft).length) draft = structuredClone(submitted.orders || {});
-    syncScene({ armies: [...v.mine, ...v.enemies], ghosts: v.ghosts.map(gh => ({ ...gh, side: side === 'red' ? 'blue' : 'red' })), fallen: v.fallen }, !!advanced);
+    if (first || rewound || advanced) { draft = {}; sel = null; selG = 0; }
+    if (submitted && submitted.turn === v.turn && v.status === 'playing' && !Object.keys(draft).length) draft = fromOrders(submitted.orders);
+    shownKey = splitKey();
+    syncScene(sceneData(), !!advanced);
     render();
     clearTimeout(pendingT);
     if (first) {
@@ -351,9 +391,35 @@ if (role === 'red' || role === 'blue') {
   });
   be.on(`orders/${side}`, v => {
     submitted = parse(v);
-    if (view && submitted && submitted.turn === view.turn && !Object.keys(draft).length) draft = structuredClone(submitted.orders || {});
+    if (view && view.status === 'playing' && submitted && submitted.turn === view.turn && !Object.keys(draft).length) draft = fromOrders(submitted.orders);
     render();
   });
+
+  const tidy = a => {   // 整支都固守就不用記
+    const gs = draft[a.id];
+    if (gs && gs.length === 1 && gs[0].type === 'hold') delete draft[a.id];
+  };
+  function setOrder(a, o) {
+    const gs = draft[a.id] = groups(a).map(g => ({ ...g }));
+    const g = gs[Math.min(selG, gs.length - 1)];
+    g.type = o.type; if (o.to) g.to = o.to; else delete g.to;
+    tidy(a); render();
+  }
+  function splitArmy(a) {   // 從人數最多的一隊分出一半，成為新的一隊
+    const gs = draft[a.id] = groups(a).map(g => ({ ...g }));
+    const big = gs.reduce((m, g) => (g.n > m.n ? g : m), gs[0]);
+    if (big.n < 2 || gs.length >= TEAM.length) return;
+    const n = Math.floor(big.n / 2); big.n -= n;
+    gs.push({ n, type: 'hold' }); selG = gs.length - 1;
+    render();
+  }
+  function shift(a, i, d) {   // 第 i 隊加一個或減一個單位，和相鄰的隊互補
+    const gs = draft[a.id] = groups(a).map(g => ({ ...g }));
+    const j = (i + 1) % gs.length, give = d > 0 ? gs[j] : gs[i], take = d > 0 ? gs[i] : gs[j];
+    if (give.n < 2) { toast('每一隊至少要有 1 個單位'); return; }
+    give.n--; take.n++; render();
+  }
+  function mergeArmy(a) { delete draft[a.id]; selG = 0; render(); }
 
   onNodeTap = n => {
     if (!view || view.status !== 'playing') return;
@@ -361,23 +427,24 @@ if (role === 'red' || role === 'blue') {
     const o = sa && R.legalOrders(null, sa).find(x => x.to === n);
     if (o) { setOrder(sa, o); return; }
     const mine = view.mine.find(x => x.node === n);
-    if (mine) { sel = mine.id; render(); focusSel(); return; }
+    if (mine) {
+      if (mine.id === sel) selG = (selG + 1) % groups(mine).length;   // 再點一次：換下一隊
+      else { sel = mine.id; selG = 0; }
+      render(); focusSel(); return;
+    }
     sel = null; render();
   };
-  function setOrder(a, o) {
-    if (o.type === 'hold') delete draft[a.id];
-    else if (o.type === 'regroup') draft[a.id] = { type: 'regroup' };
-    else { const keep = draft[a.id]; draft[a.id] = { type: o.type, to: o.to, count: keep && keep.type === o.type && keep.to === o.to ? keep.count : a.units }; }
-    render();
-  }
-  const sameOrders = (x, y) => JSON.stringify(Object.entries(x || {}).sort()) === JSON.stringify(Object.entries(y || {}).sort());
 
   function render() {
     if (!view) return;
     const playing = view.status === 'playing';
     const sub = playing && submitted && submitted.turn === view.turn;
-    const changed = sub && !sameOrders(draft, submitted.orders);
+    const changed = sub && JSON.stringify(toOrders()) !== JSON.stringify(fromThenTo(submitted.orders));
     const sa = playing ? view.mine.find(a => a.id === sel) : null;
+    if (sa) selG = Math.min(selG, groups(sa).length - 1);
+    // 分隊有變動時，重畫地圖上的部隊（不播動畫）
+    const key = splitKey();
+    if (key !== shownKey) { shownKey = key; syncScene(sceneData(), false); }
     // 地圖標記
     const mk = {};
     if (playing) {
@@ -386,7 +453,7 @@ if (role === 'red' || role === 'blue') {
       if (sa) for (const o of R.legalOrders(null, sa)) if (o.to) mk[o.to] = o.type === 'strike' ? 'attack' : 'move';
     } else Object.assign(mk, allNodeMarks());
     drawMarkers(mk);
-    drawArrows(playing ? view.mine.filter(a => draft[a.id]?.to).map(a => ({ from: a.node, to: draft[a.id].to, side, strike: draft[a.id].type === 'strike' })) : []);
+    drawArrows(playing ? view.mine.flatMap(a => groups(a).map((g, i) => g.to ? { from: a.node, to: g.to, side, strike: g.type === 'strike', text: isSplit(a) ? `${TEAM[i]}隊` : '' } : null).filter(Boolean)) : []);
     // 面板
     const c = view.cfg;
     let h = `<div class="phead"><b>第 ${view.turn}／${c.maxTurns} 回合</b><span class="muted">${side === 'red' ? `已折損 ${view.lost.red}（滿 ${R.redLoseAt(c)} 即敗）` : `紅軍已折損 ${view.lost.red}／${R.redLoseAt(c)}，我軍折損 ${view.lost.blue}`}</span></div>`;
@@ -398,33 +465,47 @@ if (role === 'red' || role === 'blue') {
       return;
     }
     h += '<div class="chips">';
-    for (const a of view.mine) h += `<div class="chip ${a.id === sel ? 'sel' : ''}" data-id="${a.id}"><b>${NN(a.node)}</b>　${a.units} 單位${stBadge(a)}<br><span class="ord">命令：${orderText(draft[a.id], a)}</span></div>`;
+    for (const a of view.mine) {
+      const gs = groups(a);
+      const ord = gs.length === 1 ? `命令：${gText(gs[0])}` : a.id === sel ? '各隊命令見下方' : gs.map((g, i) => `${TEAM[i]}隊 ${g.n}：${gText(g)}`).join('<br>');
+      h += `<div class="chip ${a.id === sel ? 'sel' : ''}" data-id="${a.id}"><b>${NN(a.node)}</b>　${a.units} 單位${stBadge(a)}${gs.length > 1 ? `<span class="badge split">分 ${gs.length} 隊</span>` : ''}<br><span class="ord">${ord}</span></div>`;
+    }
     if (!view.mine.length) h += '<span class="muted">你已沒有部隊。</span>';
     h += '</div>';
     if (sa) {
-      const o = draft[sa.id] || { type: 'hold' };
+      const gs = groups(sa), g = gs[selG];
+      const canSplit = gs.some(x => x.n >= 2) && gs.length < TEAM.length;
+      h += `<div class="teamhead"><b>${NN(sa.node)}的部隊</b>`;
+      if (canSplit) h += `<button class="btn sm act" id="split">＋ 分兵${gs.length > 1 ? '（再分一隊）' : ''}</button>`;
+      if (gs.length > 1) h += `<button class="btn sm" id="merge">合併回一隊</button>`;
+      h += '</div>';
+      if (gs.length > 1) {
+        h += '<div class="teams">';
+        gs.forEach((x, i) => { h += `<div class="team ${i === selG ? 'sel' : ''}" data-g="${i}"><b>${TEAM[i]}隊</b><button data-s="-1" data-g="${i}">－</button><b class="tn">${x.n}</b><button data-s="1" data-g="${i}">＋</button><span class="ord">${gText(x)}</span></div>`; });
+        h += '</div>';
+      } else if (canSplit) h += `<div class="muted hint">要兵分幾路，先按「分兵」分好隊，再替每一隊選去處。</div>`;
       const short = x => x.type === 'hold' ? '固守' : x.type === 'regroup' ? '重新列陣' : x.type === 'strike' ? `出擊${NN(x.to)}（聲望−${c.prestigeHit}）` : `→ ${NN(x.to)}`;
-      h += `<div class="opts">${R.legalOrders(null, sa).map((x, i) => `<button data-i="${i}" class="${x.type === o.type && x.to === o.to ? 'on' : ''} ${x.type === 'strike' ? 'strike' : ''}">${esc(short(x))}</button>`).join('')}</div>`;
-      if (o.to && sa.units > 1) {
-        const n = o.count || sa.units;
-        h += `<div class="count">派出 <button data-c="-1">－</button><b>${n}</b><button data-c="1">＋</button> <span class="muted">${n < sa.units ? `其餘 ${sa.units - n} 個單位留守` : '全軍出動'}</span></div>`;
-      }
-    } else if (view.mine.length) h += '<div class="muted hint">點部隊（上面的卡片，或地圖上的黃圈）再選去處。白圈是你能走的點位，綠圈是這支部隊現在能去的地方。</div>';
+      h += `<div class="opts">${gs.length > 1 ? `<span class="who">${TEAM[selG]}隊：</span>` : ''}${R.legalOrders(null, sa).map((x, i) => `<button data-i="${i}" class="${x.type === g.type && x.to === g.to ? 'on' : ''} ${x.type === 'strike' ? 'strike' : ''}">${esc(short(x))}</button>`).join('')}</div>`;
+    } else if (view.mine.length) h += '<div class="muted hint">點部隊（上面的卡片，或地圖上的黃圈）下令。白圈是你能走的點位，綠圈是這支部隊現在能去的地方。</div>';
     h += `<button class="btn main ${sub && !changed ? 'sent' : ''}" id="send">${!sub ? '送出本回合命令' : changed ? '命令有修改：重新送出' : '✓ 已送出（可修改後再送）'}</button>`;
     if (sub && !changed) h += '<div class="waitnote">命令已送達。<b>老師結算後，雙方部隊才會同時行動</b>，在那之前部隊會留在原地。</div>';
     $('#panel').innerHTML = h;
     resize();
-    $('#panel').querySelectorAll('.chip').forEach(el => el.onclick = () => { sel = sel === el.dataset.id ? null : el.dataset.id; render(); if (sel) focusSel(); else focusMine(); });
-    $('#panel').querySelectorAll('.opts button').forEach(el => el.onclick = () => setOrder(sa, R.legalOrders(null, sa)[+el.dataset.i]));
-    $('#panel').querySelectorAll('.count button').forEach(el => el.onclick = () => { const o = draft[sa.id]; o.count = Math.max(1, Math.min(sa.units, (o.count || sa.units) + +el.dataset.c)); render(); });
+    const P = $('#panel');
+    P.querySelectorAll('.chip').forEach(el => el.onclick = () => { if (sel === el.dataset.id) sel = null; else { sel = el.dataset.id; selG = 0; } render(); if (sel) focusSel(); else focusMine(); });
+    if ($('#split')) $('#split').onclick = () => splitArmy(sa);
+    if ($('#merge')) $('#merge').onclick = () => mergeArmy(sa);
+    P.querySelectorAll('.team').forEach(el => el.onclick = e => { if (e.target.dataset.s) return; selG = +el.dataset.g; render(); });
+    P.querySelectorAll('.team button').forEach(el => el.onclick = () => { selG = +el.dataset.g; shift(sa, +el.dataset.g, +el.dataset.s); });
+    P.querySelectorAll('.opts button').forEach(el => el.onclick = () => setOrder(sa, R.legalOrders(null, sa)[+el.dataset.i]));
     $('#send').onclick = async () => {
-      const clean = {};
-      for (const a of view.mine) { const o = draft[a.id]; if (o) clean[a.id] = { type: o.type, ...(o.to ? { to: o.to, count: o.count || a.units } : {}) }; }
-      const turn = view.turn;
-      try { await be.set(`orders/${side}`, JSON.stringify({ turn, orders: clean, at: Date.now() })); sel = null; render(); toast('✓ 命令已送出'); focusMine(); }
+      const turn = view.turn, orders = toOrders();
+      try { await be.set(`orders/${side}`, JSON.stringify({ turn, orders, at: Date.now() })); sel = null; render(); toast('✓ 命令已送出'); focusMine(); }
       catch (e) { toast('送出失敗，請檢查網路後再試一次', 4000); }
     };
   }
+  // 已送出的命令換成同一種寫法，才能和目前的草稿比較
+  function fromThenTo(orders) { const keep = draft; draft = fromOrders(orders); const out = toOrders(); draft = keep; return out; }
 }
 
 // ====================== 裁判 ======================
@@ -490,7 +571,7 @@ if (role === 'ref') {
     const arrows = [];
     for (const s of ['red', 'blue']) {
       const o = playing && cur(s); if (!o) continue;
-      for (const [id, x] of Object.entries(o.orders || {})) { const a = game.armies.find(y => y.id === id && y.side === s); if (a && x.to && R.legalOrders(null, a).some(l => l.to === x.to && l.type === x.type)) arrows.push({ from: a.node, to: x.to, side: s, strike: x.type === 'strike' }); }
+      for (const [id, x] of Object.entries(o.orders || {})) { const a = game.armies.find(y => y.id === id && y.side === s); if (a) arrows.push(...orderArrows(a, x, s)); }
     }
     drawArrows(arrows);
     const armyList = s => game.armies.filter(a => a.side === s).map(a => {

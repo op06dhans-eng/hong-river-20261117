@@ -32,3 +32,5 @@ body[data-style=D] .lab.node.here{color:#ffe27a;border-color:#ffd23f}
 .lab.unit.ghost{opacity:.85;border:2px dashed #fff}
 body[data-style=D] .lab.node{background:rgba(0,20,30,.85);color:#dff}
 body[data-style=D] .lab.node.red{color:#ff8a80;border-color:#ff3b30}body[data-style=D] .lab.node.blue{color:#8cc8ff;border-color:#2f9bff}body[data-style=D] .lab.node.both{color:#ffe27a;border-color:#f0c040}
+.lab.arrow{font-weight:900;font-size:12px;color:#fff;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.55)}
+.lab.arrow.red{background:#b3261e}.lab.arrow.blue{background:#1f4e9c}.lab.arrow.strike{background:#d2500f}

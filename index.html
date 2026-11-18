@@ -25,7 +25,7 @@
   #top button{flex:0 0 auto;font-size:13px;padding:5px 9px;border-radius:6px;border:1px solid var(--line);background:rgba(244,236,216,.95);color:var(--ink)}
   @media (max-width:700px){ #top{padding:0 6px;gap:4px} #top .room{display:none} #top button{padding:5px 6px;font-size:12px} #top .side{padding:3px 7px;font-size:14px} }
   #banner{position:fixed;left:calc((100vw - var(--dockR))/2);transform:translateX(-50%);top:48px;white-space:nowrap;z-index:4;background:#7a3b10;color:#fff;font-size:11px;padding:2px 8px;border-radius:6px;opacity:.85;pointer-events:none}
-  #toast{position:fixed;left:calc((100vw - var(--dockR))/2);transform:translateX(-50%);top:54px;max-width:calc(100vw - var(--dockR) - 24px);z-index:25;background:#1d8c4a;color:#fff;font-weight:700;font-size:15px;line-height:1.4;padding:8px 16px;border-radius:8px;box-shadow:0 4px 18px rgba(0,0,0,.4);display:none;text-align:center}
+  #toast{position:fixed;left:calc((100vw - var(--dockR))/2);transform:translateX(-50%);top:54px;max-width:calc(100vw - var(--dockR) - 24px);z-index:25;background:#1d8c4a;color:#fff;font-weight:700;font-size:15px;line-height:1.4;padding:8px 16px;border-radius:8px;box-shadow:0 4px 18px rgba(0,0,0,.4);display:none;text-align:center;width:max-content}
 
   /* 按鈕 */
   .btn{font-size:14px;padding:8px 12px;border-radius:8px;border:1px solid var(--line);background:#fff;color:var(--ink)}
@@ -36,7 +36,7 @@
   .badge.warn{background:#f6c9a0;color:#8a3a08}
 
   /* 學生面板：直拿在下方，橫拿在右側；地圖會讓出位置 */
-  #panel{position:fixed;left:0;right:0;bottom:0;max-height:46vh;overflow:auto;background:var(--paper);border-top:3px solid var(--gold);
+  #panel{position:fixed;left:0;right:0;bottom:0;max-height:56vh;overflow:auto;background:var(--paper);border-top:3px solid var(--gold);
     padding:8px 10px calc(10px + env(safe-area-inset-bottom));z-index:6}
   .phead{display:flex;justify-content:space-between;align-items:baseline;gap:8px;font-size:15px;margin-bottom:4px}
   .phead .muted{text-align:right}
@@ -58,6 +58,18 @@
   .count button{width:36px;height:36px;font-size:18px;border-radius:8px;border:1px solid var(--line);background:#fff;color:var(--ink)}
   .count input{width:70px;font:inherit;padding:4px;border:1px solid var(--line);border-radius:6px;background:#fff}
   .hint{margin:6px 2px 0}
+  #panel #send{position:sticky;bottom:0;box-shadow:0 -6px 8px var(--paper)}
+  .badge.split{background:#ffe08a;color:#6b4a00}
+  .teamhead{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:6px 2px 0;font-size:14px}
+  .btn.sm.act{background:var(--ink);color:var(--paper);border-color:var(--ink);padding:5px 10px;font-size:13px;font-weight:700}
+  .teamhead .btn.sm{padding:5px 10px;font-size:13px;margin-left:0}
+  .teams{display:flex;flex-direction:column;gap:5px;margin:6px 2px 0}
+  .team{display:flex;align-items:center;gap:8px;padding:3px 8px;border:1px solid var(--line);border-radius:8px;background:#fffaf0;font-size:14px;cursor:pointer}
+  .team.sel{outline:3px solid var(--gold);background:#fff3c8}
+  .team button{width:32px;height:30px;line-height:1;font-size:18px;border-radius:8px;border:1px solid var(--line);background:#fff;color:var(--ink);flex:0 0 auto}
+  .team .tn{min-width:1.2em;text-align:center;font-size:16px}
+  .team .ord{color:#6b4e1f;font-size:13px}
+  .opts .who{align-self:center;font-weight:700;font-size:14px}
   .result{margin:6px 0;font-size:15px;line-height:1.5;color:#7a1a10}
   .waitnote{margin-top:8px;padding:8px 10px;border-radius:8px;background:#fff1c2;border:1px solid #e0b84a;font-size:13px;line-height:1.5}
   @media (orientation: landscape) and (max-height: 520px){
@@ -104,10 +116,10 @@
   #home .row .btn{padding:11px;font-weight:700}
   .hline{border-top:1px solid var(--line);margin:16px 0 8px}
 </style>
-<link rel="stylesheet" href="world.css?v=8">
+<link rel="stylesheet" href="world.css?v=9">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-<script src="config.js?v=8"></script>
-<script src="world.js?v=8"></script>
+<script src="config.js?v=9"></script>
+<script src="world.js?v=9"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
 </head>
 <body data-style="B">
@@ -116,6 +128,6 @@
 <div id="loading">正在鋪設地形……</div>
 <div id="top"></div>
 <div id="ui"></div>
-<script type="module" src="app.js?v=8"></script>
+<script type="module" src="app.js?v=9"></script>
 </body>
 </html>

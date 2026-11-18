@@ -42,6 +42,11 @@ ok(g.status === 'blue_win' && g.turn === 12, '12 回合到，藍軍勝 → ' + g
 g = play(Array(5).fill({}), { maxTurns: 5, redUnits: 99, prestigeHit: 9, sightRange: 0 });
 ok(g.status === 'blue_win' && g.cfg.redUnits === 12 && g.cfg.prestigeHit === 5 && g.cfg.sightRange === 1, '參數超出範圍會被夾住');
 
+// 一開始就分三路
+g = play([{ r1: [{ type: 'move', to: 'W1', count: 2 }, { type: 'move', to: 'C1', count: 3 }] }]);
+ok(at(g, 'red').split(',').sort().join() === 'C1x3:formed,Sx1:formed,W1x2:formed', '開局分三路 → ' + at(g, 'red'));
+g = play([{ r1: [{ type: 'move', to: 'W1', count: 4 }, { type: 'move', to: 'C1', count: 9 }, { type: 'move', to: 'H', count: 1 }] }]);
+ok(at(g, 'red').split(',').sort().join() === 'C1x2:formed,W1x4:formed', '分兵超過兵力會自動修正 → ' + at(g, 'red'));
 console.log('== 每個點位能去的地方都屬於本方');
 for (const s of ['red', 'blue']) for (const [n, nb] of Object.entries(R.ADJ[s])) for (const t of Object.keys(nb)) {
   const good = R.NODES[t].side === 'both' || R.NODES[t].side === s || (s === 'red' && t === 'H');
@@ -63,8 +68,13 @@ for (let n = 0; n < 30000; n++) {
     for (const a of g.armies) {
       let opts2 = R.legalOrders(g, a);
       if (aggressive) { const adv = opts2.filter(o => o.type !== 'hold'); if (adv.length && rnd() < 0.85) opts2 = adv; }
-      const o = pick(opts2);
-      orders[a.id] = { type: o.type, to: o.to, count: rnd() < 0.3 ? 1 + Math.floor(rnd() * a.units) : a.units };
+      if (rnd() < 0.35 && a.units > 1) {   // 分成好幾隊，各走各的
+        const k = 2 + Math.floor(rnd() * 3);
+        orders[a.id] = Array.from({ length: k }, () => { const o = pick(opts2); return { type: o.type, to: o.to, count: 1 + Math.floor(rnd() * a.units) }; });
+      } else {
+        const o = pick(opts2);
+        orders[a.id] = { type: o.type, to: o.to, count: rnd() < 0.3 ? 1 + Math.floor(rnd() * a.units) : a.units };
+      }
     }
     const before = g;
     try { g = R.resolveTurn(g, orders); } catch (e) { ok(false, '結算丟出例外：' + e.message + JSON.stringify(orders)); break; }

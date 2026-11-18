@@ -118,14 +118,25 @@ export function legalOrders(game, army) {
   return opts;
 }
 
-// 不合法的命令一律當作原地固守
-function sanitize(a, o) {
-  if (!o || typeof o !== 'object') return { type: 'hold' };
-  const cnt = v => { const n = Math.floor(Number(v)); return n >= 1 && n < a.units ? n : a.units; };
-  if (o.type === 'move' && ADJ[a.side][a.node]?.[o.to]) return { type: 'move', to: o.to, count: cnt(o.count) };
-  if (o.type === 'strike' && a.side === 'blue' && STRIKE[a.node] === o.to) return { type: 'strike', to: o.to, count: cnt(o.count) };
-  if (o.type === 'regroup' && a.side === 'red' && a.state === 'disordered') return { type: 'regroup' };
-  return { type: 'hold' };
+// 一支部隊的命令可以是一筆，也可以是好幾筆（分兵：每一隊各自的去處）。
+// 回傳 { movers: [{type,to,count}], stay: 留在原地的兵力, regroup: 留下的是否重新列陣 }；不合法的一律當作留在原地
+export function parseOrders(a, raw) {
+  const list = Array.isArray(raw) ? raw : raw && typeof raw === 'object' ? [raw] : [];
+  let left = a.units, regroup = false;
+  const movers = [];
+  for (const o of list.slice(0, 12)) {
+    if (!o || typeof o !== 'object') continue;
+    if (o.type === 'regroup') { if (a.side === 'red' && a.state === 'disordered') regroup = true; continue; }
+    const okMove = o.type === 'move' && ADJ[a.side][a.node]?.[o.to];
+    const okStrike = o.type === 'strike' && a.side === 'blue' && STRIKE[a.node] === o.to;
+    if (!okMove && !okStrike) continue;
+    if (left <= 0) break;
+    let n = Math.floor(Number(o.count)); if (!(n >= 1)) n = left;
+    n = Math.min(n, left); left -= n;
+    const same = movers.find(m => m.type === o.type && m.to === o.to);
+    if (same) same.count += n; else movers.push({ type: o.type, to: o.to, count: n });
+  }
+  return { movers, stay: left, regroup: regroup && left > 0 };
 }
 
 const eff = p => p.path.slice(0, p.cut + 1);
@@ -173,16 +184,19 @@ export function resolveTurn(prev, orders) {
   };
   for (const a of [...g.armies]) {
     delete a.trail;
-    const o = sanitize(a, orders?.[a.id]);
-    let mover = a;
-    if ((o.type === 'move' || o.type === 'strike') && o.count < a.units) {
-      mover = { ...a, id: (a.side === 'red' ? 'r' : 'b') + (g.seq++), units: o.count };
-      a.units -= o.count;
-      g.armies.push(mover);
-      plans.push(mk(a, { type: 'hold' }));
-      say(`${sideName(a.side)}在${NODES[a.node].name}分兵：${o.count} 個單位${o.type === 'strike' ? '出擊' : '前往'}${NODES[o.to].name}，${a.units} 個單位留守。`, a.side);
-    }
-    plans.push(mk(mover, o));
+    const { movers, stay, regroup } = parseOrders(a, orders?.[a.id]);
+    const stayOrder = { type: regroup ? 'regroup' : 'hold' };
+    if (!movers.length) { plans.push(mk(a, stayOrder)); continue; }
+    const parts = movers.map(m => `${m.count} 個單位${m.type === 'strike' ? '出擊' : '前往'}${NODES[m.to].name}`);
+    if (stay > 0) parts.push(`${stay} 個單位留守`);
+    if (parts.length > 1) say(`${sideName(a.side)}在${NODES[a.node].name}分兵：${parts.join('、')}。`, a.side);
+    movers.forEach((m, i) => {
+      let army = a;
+      if (stay > 0 || i > 0) { army = { ...a, id: (a.side === 'red' ? 'r' : 'b') + (g.seq++), units: m.count }; g.armies.push(army); }
+      else a.units = m.count;
+      plans.push(mk(army, m));
+    });
+    if (stay > 0) { a.units = stay; plans.push(mk(a, stayOrder)); }
   }
   const reds = plans.filter(p => p.army.side === 'red');
   const blues = plans.filter(p => p.army.side === 'blue');
