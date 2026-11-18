@@ -1,4 +1,4 @@
-import * as R from './rules.js?v=13';
+import * as R from './rules.js?v=15';
 
 const $ = s => document.querySelector(s);
 const params = new URLSearchParams(location.search);
@@ -230,21 +230,24 @@ function drawArrows(items) {
   });
   SCN.dirty();
 })(0);
-// 北岸沿河的路：原地形上沒有，另外畫成土黃色虛線
+// 棋盤上的每一條連線都畫成虛線：相鄰的點位一格可到（渡河的連線畫成藍白色）
 {
-  const mat = new THREE.MeshBasicMaterial({ color: '#d8b46a', fog: false });
-  for (const [a0, b0] of [['W3', 'C3'], ['C3', 'E3']]) {
-    const A = wp(a0), B = wp(b0), L = A.distanceTo(B), n = Math.floor(L / 2.3);
-    for (let i = 2; i < n - 2; i += 1) {
+  // 不被地形遮住、在兩種畫風都看得清楚：深色底線＋亮色虛線
+  const mk = c => new THREE.MeshBasicMaterial({ color: c, fog: false, depthTest: false, transparent: true, opacity: 0.95 });
+  const land = mk('#ffd76a'), ford = mk('#cfeaff'), under = mk('#2a1d10'); under.opacity = 0.55;
+  for (const [a0, b0] of R.BOARD) {
+    const A = wp(a0), B = wp(b0), L = Math.hypot(B.x - A.x, B.z - A.z), n = Math.max(4, Math.floor(L / 2.3));
+    const wet = R.NODES[a0].kind === 'river' || R.NODES[b0].kind === 'river';
+    const yaw = Math.atan2(B.x - A.x, B.z - A.z);
+    for (let i = 2; i < n - 1; i++) {
+      const t = i / n, x = A.x + (B.x - A.x) * t, z = A.z + (B.z - A.z) * t, y = Math.max(SCN.H(x, z), 0.05) + 0.2;
+      const u = new THREE.Mesh(new THREE.BoxGeometry(2.0, 0.05, L / n + 0.05), under); u.position.set(x, y, z); u.rotation.y = yaw; u.renderOrder = 14; SCN.scene.add(u);
       if (i % 2) continue;
-      const t = i / n, x = A.x + (B.x - A.x) * t, z = A.z + (B.z - A.z) * t;
-      const m = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.08, 2.0), mat);
-      m.position.set(x, Math.max(SCN.H(x, z), 0.05) + 0.08, z); m.rotation.y = Math.atan2(B.x - A.x, B.z - A.z);
-      SCN.scene.add(m);
+      const m = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.08, 1.9), wet ? ford : land); m.position.set(x, y + 0.02, z); m.rotation.y = yaw; m.renderOrder = 15; SCN.scene.add(m);
     }
   }
 }
-const myNodes = side => NODE_IDS.filter(n => R.NODES[n].side === side || R.NODES[n].side === 'both');
+const myNodes = side => NODE_IDS.filter(n => !(R.NODES[n].kind === 'camp' && R.NODES[n].side === side)).concat(side === 'red' ? ['S'] : ['H']);
 const allNodeMarks = () => Object.fromEntries(NODE_IDS.map(n => [n, n === 'H' ? 'blue' : n === 'S' ? 'red' : R.NODES[n].side]));
 
 let onNodeTap = null;
@@ -333,16 +336,17 @@ function helpHtml(side, c) {
   const pct = Math.round(c.disorderFactor * 100);
   const common = `<p>• 每回合每支部隊可移動一格（一個圈到相鄰的圈）。</p>
     <p>• 下令：點部隊，面板會列出它能去的每個地方和「留在原地」，用＋－決定每個地方派幾個單位；派往兩處以上就是分兵。</p>
-    <p>• 只看得到同一條路線上相距 ${c.sightRange} 格以內的敵軍；看不到不代表沒有。</p>
+    <p>• 地圖像棋盤：虛線連著的兩個點位都相鄰，一回合走一格，可以互相支援。</p>
+    <p>• 只看得到相距 ${c.sightRange} 格以內的敵軍；看不到不代表沒有。面板上的「戰場態勢」會提醒敵我的強弱。</p>
     <p>• 送出命令後，要等老師結算，雙方才會<b>同時</b>行動。</p>`;
   if (side === 'red') return `<h2>你是紅軍</h2>
     <p>你率紅軍 ${c.redUnits} 個單位自南方來，必須渡過南河。<b>任何一支部隊攻入藍軍本陣就獲勝。</b></p>${common}
     <p>• 站在渡口（河中）時戰力只剩 ${pct}%；登上北岸後也只有 ${pct}%，要按「重新列陣」原地停一回合才恢復。列陣時被攻擊，列陣會被打斷。</p>
     <p>• 在河中、或剛登岸還沒列陣就吃了敗仗，會被逐回南岸。</p>
     <p>• 藍軍也可以渡河來攻。藍軍在河中時，你站在南岸點可以「出擊」渡口打他。</p>
-    <p>• 折損 ${R.redLoseAt(c)} 個單位就算戰敗；藍軍攻入你的營地、或第 ${c.maxTurns} 回合結束還沒攻入藍軍本陣，也算戰敗。</p>`;
+    <p>• 全軍覆沒、藍軍攻入你的營地，或第 ${c.maxTurns} 回合結束還沒攻入藍軍本陣，就算戰敗。折損多少不會直接判輸。</p>`;
   return `<h2>你是藍軍</h2>
-    <p>你率藍軍 ${c.blueUnits} 個單位守國都，敵眾我寡。<b>讓紅軍折損 ${R.redLoseAt(c)} 個單位、攻入紅軍營地，或守到第 ${c.maxTurns} 回合結束，就獲勝。</b></p>${common}
+    <p>你率藍軍 ${c.blueUnits} 個單位守國都，敵眾我寡。<b>消滅全部紅軍、攻入紅軍營地，或守到第 ${c.maxTurns} 回合結束，就獲勝。</b></p>${common}
     <p>• 紅軍在河中或上岸還沒列陣時，戰力只剩 ${pct}%，而你打這種敵人戰力 ×${c.strikeBonus}。站在河岸點可以「出擊」對岸渡口。</p>
     <p>• 你也可以渡河突擊南岸。但渡河中、登上南岸還沒列陣時，你同樣只有 ${pct}% 戰力，紅軍也能出擊渡口打你；吃了敗仗會被逐回北岸。</p>
     <p>• 紅軍列好陣後和你正面交戰，你多半打不過。</p>
@@ -428,11 +432,13 @@ if (role === 'red' || role === 'blue') {
       toast('老師已重新開局或回到上一回合'); focusMine();
     } else if (advanced) {
       const rep = v.log.filter(l => l.turn === prev.turn), lines = rep.flatMap(l => l.lines);
-      const battle = lines.some(t => /之戰】|潰散/.test(t));
+      const sit = v.status === 'playing' ? R.situation(v, side).filter(x => x.kind !== 'info' || /已成列/.test(x.t)) : [];
+      const sitBox = sit.length ? `<div class="sit"><b>戰場態勢</b>${sit.map(x => `<div class="s ${x.kind}">${esc(x.t)}</div>`).join('')}</div>` : '';
+      const battle = lines.some(t => /之戰】|潰散/.test(t)) || sit.some(x => x.kind === 'danger' || x.kind === 'chance');
       setTimeout(() => battleBursts(lines), 1500);
       // 先讓大家看完行軍，再跳出戰報，不擋住戰場
       if (v.status !== 'playing') pendingT = setTimeout(() => modal(`<h2>${esc(v.result)}</h2><p class="muted">地圖上已顯示雙方全部位置。</p>${logHtml(rep)}${REVEAL}`), 3900);
-      else if (battle) pendingT = setTimeout(() => modal(`<h2>第 ${prev.turn} 回合戰報</h2>${logHtml(rep)}`, () => focusMine()), 3900);
+      else if (battle) pendingT = setTimeout(() => modal(`<h2>第 ${prev.turn} 回合戰報</h2>${logHtml(rep)}${sitBox}`, () => focusMine()), 3900);
       else { toast(`第 ${prev.turn} 回合：${lines.find(t => !/分兵/.test(t)) || '沒有發現敵軍'}`, 3200); pendingT = setTimeout(() => focusMine(), 2600); }
     }
   });
@@ -501,7 +507,7 @@ if (role === 'red' || role === 'blue') {
     // 面板
     const c = view.cfg;
     const tog = `<button class="tog" id="tog">${mini ? '展開' : '收合'}</button>`;
-    let h = `<div class="phead"><b>第 ${view.turn}／${c.maxTurns} 回合</b><span class="muted">${side === 'red' ? `已折損 ${view.lost.red}（滿 ${R.redLoseAt(c)} 即敗）` : `紅軍已折損 ${view.lost.red}／${R.redLoseAt(c)}，我軍折損 ${view.lost.blue}`}</span>${tog}</div>`;
+    let h = `<div class="phead"><b>第 ${view.turn}／${c.maxTurns} 回合</b><span class="muted">${side === 'red' ? `我軍折損 ${view.lost.red}` : `我軍折損 ${view.lost.blue}，紅軍折損 ${view.lost.red}`}</span>${tog}</div>`;
     if (view.prestige != null) h += `<div class="prest">${prestigeBar(view.prestige, c.prestige)}</div>`;
     if (!playing) {
       h = h.replace(tog, ''); $('#panel').classList.remove('mini');
@@ -510,11 +516,17 @@ if (role === 'red' || role === 'blue') {
       $('#again').onclick = () => modal(`<h2>${esc(view.result)}</h2>${logHtml(view.log.slice(-1))}${REVEAL}`);
       return;
     }
+    // 戰場態勢：依看得見的敵我位置與還沒送出的命令
+    const moves = view.mine.flatMap(a => groups(a).filter(g => g.to && g.type === 'move').map(g => ({ from: a.node, to: g.to, n: g.n })));
+    const sit = R.situation(view, side, moves);
+    const sitHtml = list => list.length ? `<div class="sit"><b>戰場態勢</b>${list.map(x => `<div class="s ${x.kind}">${esc(x.t)}</div>`).join('')}</div>` : '';
     if (mini) {
+      h += sitHtml(sit.filter(x => x.kind === 'danger' || x.kind === 'order').slice(0, 2));
       h += `<button class="btn main ${sub && !changed ? 'sent' : ''}" id="send">${!sub ? '送出本回合命令' : changed ? '命令有修改：重新送出' : '✓ 已送出（可修改後再送）'}</button>`;
       $('#panel').innerHTML = h; $('#panel').classList.add('mini'); resize(); bindPanel(); return;
     }
     $('#panel').classList.remove('mini');
+    h += sitHtml(sit);
     h += '<div class="chips">';
     for (const a of view.mine) {
       const gs = groups(a);
@@ -532,7 +544,7 @@ if (role === 'red' || role === 'blue') {
       for (const o of R.legalOrders(null, sa)) {
         if (o.type !== 'move' && o.type !== 'strike') continue;
         const k = okey(o);
-        h += row(k, o.type === 'strike' ? `出擊 ${NN(o.to)}${side === 'blue' ? '<small>（打到紅軍才扣聲望）</small>' : ''}<small>（打完回原地）</small>` : R.NODES[o.to].kind === 'river' && R.bankOf(sa.node) !== 'W' ? `渡河 → ${NN(o.to)}` : `→ ${NN(o.to)}`, m[k] || 0, '', o.type === 'strike' ? 'strike' : '');
+        h += row(k, o.type === 'strike' ? `出擊 ${NN(o.to)}<small>（打完回原地${side === 'blue' ? `；打到紅軍聲望 −${c.prestigeHit}` : ''}）</small>` : R.NODES[o.to].kind === 'river' && R.bankOf(sa.node) !== 'W' ? `渡河 → ${NN(o.to)}` : `→ ${NN(o.to)}`, m[k] || 0, '', o.type === 'strike' ? 'strike' : '');
       }
       h += row('stay', stayLabel, stay, '', 'stay');
       h += '</div><div class="muted hint">按＋把兵力從「留在原地」撥過去；撥到兩處以上就是分兵。也可以直接點地圖上的綠圈。</div>';
@@ -631,7 +643,7 @@ if (role === 'ref') {
       return `<div class="arow"><b>${NN(a.node)}</b> ${a.units} 單位${stBadge(a)}${playing ? `<span class="ord">${cur(s) ? orderText(o, a) : '尚未下令'}</span>` : ''}</div>`;
     }).join('') || '<div class="muted">已無部隊</div>';
     const both = cur('red') && cur('blue');
-    let h = `<div class="row" style="justify-content:space-between"><b style="font-size:18px">第 ${game.turn}／${c.maxTurns} 回合</b><span class="muted">紅軍折損 ${game.lost.red}／${R.redLoseAt(c)}　藍軍折損 ${game.lost.blue}</span></div>
+    let h = `<div class="row" style="justify-content:space-between"><b style="font-size:18px">第 ${game.turn}／${c.maxTurns} 回合</b><span class="muted">紅軍折損 ${game.lost.red}　藍軍折損 ${game.lost.blue}</span></div>
       <div class="prest">${prestigeBar(game.prestige, c.prestige)}</div>`;
     if (!playing) h += `<p class="result"><b>${esc(game.result)}</b></p>`;
     h += `<h4>學生入口　房號 ${esc(room)} <button class="btn sm" id="qrt">${showQR ? '隱藏 QR 碼' : '顯示 QR 碼'}</button></h4>`;
@@ -651,7 +663,7 @@ if (role === 'ref') {
       <div class="count">聲望每次扣 ${inp('sPH', 'prestigeHit')} 點</div>
       <button class="btn" id="apply">套用並重新開局</button>
       <div class="muted">學生手機上的規則說明會自動跟著這些數字改。</div></details>
-      <div class="muted legend">地圖圈色：紅＝只有紅軍能走，藍＝只有藍軍能走，金＝雙方都能走。</div>`;
+      <div class="muted legend">地圖：虛線相連的點位一回合可到；紅圈＝紅軍營地，藍圈＝藍軍本陣，金圈＝一般點位。</div>`;
     const last = game.log.at(-1);
     if (last) h += `<h4>最近戰報</h4>${logHtml([last])}`;
     if (!playing) h += REVEAL;
@@ -706,9 +718,9 @@ if (role === 'screen') {
     const ok = s => ord[s] && ord[s].turn === pub.turn;
     let h = playing
       ? `<div class="big">第 ${pub.turn}／${c.maxTurns} 回合</div><div class="stat"><span class="${ok('red') ? 'ok' : 'wait'}">紅軍${ok('red') ? '已下令' : '思考中'}</span><span class="${ok('blue') ? 'ok' : 'wait'}">藍軍${ok('blue') ? '已下令' : '思考中'}</span></div>
-         <div class="muted">戰場上的兵力只在各隊手機上顯示。紅軍折損 ${pub.lost.red}／${R.redLoseAt(c)}，藍軍折損 ${pub.lost.blue}。</div>`
+         <div class="muted">戰場上的兵力只在各隊手機上顯示。紅軍折損 ${pub.lost.red}，藍軍折損 ${pub.lost.blue}。</div>`
       : `<div class="big">${esc(pub.result)}</div><div class="prest">${prestigeBar(pub.prestige, c.prestige)}</div><div class="muted">雙方全部部隊已揭曉。</div>`;
-    h += `<div class="muted legend">地圖圈色：紅＝只有紅軍能走，藍＝只有藍軍能走，金＝雙方都能走。</div>`;
+    h += `<div class="muted legend">地圖：虛線相連的點位一回合可到；紅圈＝紅軍營地，藍圈＝藍軍本陣，金圈＝一般點位。</div>`;
     if (pub.log.length) h += logHtml(playing ? pub.log.slice(-1) : pub.log);
     if (!playing) h += REVEAL;
     $('#screenbox').innerHTML = h;

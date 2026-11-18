@@ -142,6 +142,13 @@
   .hline{border-top:1px solid var(--line);margin:16px 0 8px}
   #net{position:fixed;left:8px;bottom:8px;z-index:28;font-size:12px;padding:3px 9px;border-radius:10px;background:#1d8c4a;color:#fff;transition:opacity .6s;pointer-events:none}
   #net.fade{opacity:0} #net.off{background:#b8860b} #net.err{background:#b3261e;max-width:80vw}
+  .sit{margin:4px 0 6px;padding:6px 8px;border-radius:8px;background:#fffdf4;border:1px solid var(--line);font-size:13px;line-height:1.5}
+  .sit>b{display:block;font-size:13px;margin-bottom:2px}
+  .sit .s{padding:3px 6px;margin-top:3px;border-radius:5px;border-left:4px solid #9a8a6a;background:#f7f1e2}
+  .sit .s.danger{border-left-color:#c0392b;background:#fde8e4}
+  .sit .s.chance{border-left-color:#1d8c4a;background:#e3f5e8}
+  .sit .s.order{border-left-color:#d2700f;background:#fff0dc}
+  .modal .sit{font-size:14px}
 </style>
 <link rel="stylesheet" href="world.css?v=10">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -155,6 +162,6 @@
 <div id="loading">正在鋪設地形……</div>
 <div id="top"></div>
 <div id="ui"></div>
-<script type="module" src="app.js?v=14"></script>
+<script type="module" src="app.js?v=15"></script>
 </body>
 </html>

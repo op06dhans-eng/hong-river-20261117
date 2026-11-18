@@ -9,21 +9,21 @@ const at = (g, side) => g.armies.filter(a => a.side === side).map(a => `${a.node
 console.log('== 固定情境');
 let g;
 g = play([{ r1: { type: 'move', to: 'C1' }, b1: { type: 'move', to: 'C4' } }, { r1: { type: 'move', to: 'C2' }, b1: { type: 'move', to: 'C3' } }, { b1: { type: 'strike', to: 'C2' } }]);
-ok(g.status === 'blue_win' && g.prestige === 8 && g.lost.red === 3, '半渡而擊：藍勝、聲望 8 → ' + lastLog(g));
+ok(g.status === 'playing' && g.prestige === 8 && g.lost.red === 3 && /逐回南岸路口/.test(lastLog(g)), '半渡而擊：紅損 3 逐回南岸、聲望 8、不因折損結束 → ' + lastLog(g));
 g = play([{ r1: { type: 'move', to: 'C1' }, b1: { type: 'move', to: 'C4' } }, { r1: { type: 'move', to: 'C2' }, b1: { type: 'move', to: 'C3' } }, { r1: { type: 'move', to: 'C3' } }]);
-ok(g.status === 'blue_win' && g.prestige === 8, '紅軍登上藍軍守住的河岸：藍勝、也扣聲望 → ' + lastLog(g));
+ok(g.status === 'playing' && g.prestige === 8, '紅軍登上藍軍守住的河岸：也扣聲望 → ' + lastLog(g));
 ok(at(g, 'red') === 'C1x3:formed' && /逐回南岸路口/.test(lastLog(g)), '登岸未列陣被擊敗：逐回南岸 → ' + at(g, 'red'));
-g = play([{ r1: { type: 'move', to: 'W1' }, b1: { type: 'move', to: 'W4' } }, { r1: { type: 'move', to: 'W2' } }, { r1: { type: 'move', to: 'W3' } }, { r1: { type: 'regroup' } }, { r1: { type: 'move', to: 'W4' } }]);
+g = play([{ r1: { type: 'move', to: 'W1' }, b1: { type: 'move', to: 'W5' } }, { r1: { type: 'move', to: 'W2' }, b1: { type: 'move', to: 'W4' } }, { r1: { type: 'move', to: 'W3' } }, { r1: { type: 'regroup' } }, { r1: { type: 'move', to: 'W4' } }]);
 ok(g.status === 'red_win' && g.prestige === 10, '等列陣後決戰：藍軍覆沒、聲望 10 → ' + lastLog(g));
 // 未成列時藍軍走進去打：扣聲望
-g = play([{ r1: { type: 'move', to: 'W1' }, b1: { type: 'move', to: 'W4' } }, { r1: { type: 'move', to: 'W2' } }, { r1: { type: 'move', to: 'W3' } }, { r1: { type: 'regroup' }, b1: { type: 'move', to: 'W3' } }]);
+g = play([{ r1: { type: 'move', to: 'W1' }, b1: { type: 'move', to: 'W5' } }, { r1: { type: 'move', to: 'W2' }, b1: { type: 'move', to: 'W4' } }, { r1: { type: 'move', to: 'W3' } }, { r1: { type: 'regroup' }, b1: { type: 'move', to: 'W3' } }]);
 ok(g.prestige === 8 && g.lost.red === 3 && /列陣被打斷/.test(lastLog(g)), '擊其未陣：扣聲望、列陣被打斷 → ' + lastLog(g));
 // 對向而行必定相遇
-g = play([{ r1: { type: 'move', to: 'W1' }, b1: { type: 'move', to: 'W4' } }, { r1: { type: 'move', to: 'W2' } }, { r1: { type: 'move', to: 'W3' } }, { r1: { type: 'regroup' } }, { r1: { type: 'move', to: 'W4' }, b1: { type: 'move', to: 'W3' } }]);
+g = play([{ r1: { type: 'move', to: 'W1' }, b1: { type: 'move', to: 'W5' } }, { r1: { type: 'move', to: 'W2' }, b1: { type: 'move', to: 'W4' } }, { r1: { type: 'move', to: 'W3' } }, { r1: { type: 'regroup' } }, { r1: { type: 'move', to: 'W4' }, b1: { type: 'move', to: 'W3' } }]);
 ok(/之戰/.test(lastLog(g)), '對向而行會相遇 → ' + lastLog(g));
-// 途經點攔截
-g = play([{ r1: { type: 'move', to: 'C1' } }, { r1: { type: 'move', to: 'C2' } }, { r1: { type: 'move', to: 'C3' } }, { r1: { type: 'regroup' } }, { r1: { type: 'move', to: 'H' }, b1: { type: 'move', to: 'C4' } }]);
-ok(/中路之戰/.test(lastLog(g)), '直奔本陣在中路被攔 → ' + lastLog(g));
+// 中路一格一格走：在中路撞上藍軍
+g = play([{ r1: { type: 'move', to: 'C1' } }, { r1: { type: 'move', to: 'C2' } }, { r1: { type: 'move', to: 'C3' } }, { r1: { type: 'regroup' } }, { r1: { type: 'move', to: 'C4' }, b1: { type: 'move', to: 'C4' } }]);
+ok(/中路之戰/.test(lastLog(g)), '雙方同時進入中路 → ' + lastLog(g));
 // 追不上：藍軍離開、紅軍才到
 g = play([{ r1: { type: 'move', to: 'C1' }, b1: { type: 'move', to: 'C4' } }, { r1: { type: 'move', to: 'C2' }, b1: { type: 'move', to: 'C3' } }, { r1: { type: 'move', to: 'C3' }, b1: { type: 'move', to: 'C4' } }]);
 ok(!/之戰/.test(lastLog(g)) && at(g, 'red') === 'C3x6:disordered' && at(g, 'blue') === 'C4x3' && g.prestige === 10, '藍軍後撤一步讓紅軍上岸：不接觸、不扣聲望 → ' + at(g, 'red') + ' ' + at(g, 'blue'));
@@ -39,7 +39,7 @@ ok(at(g, 'red') === 'C1x6:formed' && at(g, 'blue') === 'C4x3', '不合法命令�
 // 北岸沿河的路：紅軍上游登岸後往右到主渡口北岸；藍軍下游北岸往右到主渡口北岸
 g = play([{ r1: { type: 'move', to: 'W1' } }, { r1: { type: 'move', to: 'W2' } }, { r1: { type: 'move', to: 'W3' } }, { r1: { type: 'move', to: 'C3' } }]);
 ok(at(g, 'red') === 'C3x6:disordered', '紅軍沿河從北岸西丘到主渡口北岸 → ' + at(g, 'red'));
-g = play([{ b1: { type: 'move', to: 'E4' } }, { b1: { type: 'move', to: 'E3' } }, { b1: { type: 'move', to: 'C3' } }]);
+g = play([{ b1: { type: 'move', to: 'E5' } }, { b1: { type: 'move', to: 'E4' } }, { b1: { type: 'move', to: 'E3' } }, { b1: { type: 'move', to: 'C3' } }]);
 ok(at(g, 'blue') === 'C3x3', '藍軍沿河從下游北岸到主渡口北岸 → ' + at(g, 'blue'));
 // 藍軍渡河：渡河中、登岸未列陣、攻入紅軍營地
 g = play([{ b1: { type: 'move', to: 'C4' } }, { b1: { type: 'move', to: 'C3' } }, { b1: { type: 'move', to: 'C2' } }]);
@@ -55,6 +55,21 @@ ok(/主渡口之戰/.test(lastLog(g)) && g.prestige === 10 && /逐回主渡口�
 // 回合上限
 g = play(Array(12).fill({}));
 ok(g.status === 'blue_win' && g.turn === 12, '12 回合到，藍軍勝 → ' + g.result);
+// 南岸三點互相支援、北岸可橫移
+g = play([{ r1: { type: 'move', to: 'W1' } }, { r1: { type: 'move', to: 'C1' } }, { r1: { type: 'move', to: 'E1' } }]);
+ok(at(g, 'red') === 'E1x6:formed', '南岸橫移 → ' + at(g, 'red'));
+g = play([{ b1: { type: 'move', to: 'C4' } }, { b1: { type: 'move', to: 'W5' } }, { b1: { type: 'move', to: 'W4' } }]);
+ok(at(g, 'blue') === 'W4x3', '藍軍經西路口到北岸小丘 → ' + at(g, 'blue'));
+// 打光才結束
+g = play([{ r1: { type: 'move', to: 'C1' }, b1: { type: 'move', to: 'C4' } }, { r1: { type: 'move', to: 'C2' }, b1: { type: 'move', to: 'C3' } }, { b1: { type: 'strike', to: 'C2' } }], { redUnits: 2 });
+ok(g.status === 'blue_win' && /紅軍全軍覆沒/.test(g.result), '紅軍全滅才算藍勝 → ' + g.result);
+// 態勢提示
+g = play([{ r1: { type: 'move', to: 'C1' }, b1: { type: 'move', to: 'C4' } }, { r1: { type: 'move', to: 'C2' }, b1: { type: 'move', to: 'C3' } }]);
+const sr = R.situation(R.viewFor(g, 'red'), 'red'), sb = R.situation(R.viewFor(g, 'blue'), 'blue');
+ok(sr.some(x => x.kind === 'danger' && /正在渡河/.test(x.t)), '紅方看到自己渡河危險：' + sr.map(x => x.t).join(' / '));
+ok(sb.some(x => x.kind === 'chance' && /聲望/.test(x.t)), '藍方看到進攻機會與聲望：' + sb.map(x => x.t).join(' / '));
+g = play([{ r1: { type: 'move', to: 'C1' }, b1: { type: 'move', to: 'C4' } }, { b1: { type: 'move', to: 'C3' } }]);
+ok(R.situation(R.viewFor(g, 'red'), 'red', [{ from: 'C1', to: 'C2', n: 6 }]).some(x => x.kind === 'order' && /半渡/.test(x.t)), '下令渡河時提醒對岸有敵');
 g = play(Array(5).fill({}), { maxTurns: 5, redUnits: 99, prestigeHit: 9, sightRange: 0 });
 ok(g.status === 'blue_win' && g.cfg.redUnits === 12 && g.cfg.prestigeHit === 5 && g.cfg.sightRange === 1, '參數超出範圍會被夾住');
 
@@ -63,11 +78,9 @@ g = play([{ r1: [{ type: 'move', to: 'W1', count: 2 }, { type: 'move', to: 'C1',
 ok(at(g, 'red').split(',').sort().join() === 'C1x3:formed,Sx1:formed,W1x2:formed', '開局分三路 → ' + at(g, 'red'));
 g = play([{ r1: [{ type: 'move', to: 'W1', count: 4 }, { type: 'move', to: 'C1', count: 9 }, { type: 'move', to: 'H', count: 1 }] }]);
 ok(at(g, 'red').split(',').sort().join() === 'C1x2:formed,W1x4:formed', '分兵超過兵力會自動修正 → ' + at(g, 'red'));
-console.log('== 每個點位能去的地方都屬於本方');
-for (const s of ['red', 'blue']) for (const [n, nb] of Object.entries(R.ADJ[s])) for (const t of Object.keys(nb)) {
-  const good = R.NODES[t].side === 'both' || R.NODES[t].side === s || (s === 'red' && t === 'H') || (s === 'blue' && t === 'S');
-  ok(good, `${s} ${n}→${t}`);
-}
+console.log('== 棋盤：相鄰點位雙向可走、全部連通');
+for (const s of ['red', 'blue']) for (const [n, nb] of Object.entries(R.ADJ[s])) { ok(Object.keys(nb).length >= 2, `${n} 只有一個出口`); for (const t of Object.keys(nb)) ok(R.ADJ.red[t][n] && R.ADJ.blue[t][n], `${n}↔${t} 不是雙向`); }
+for (const a of Object.keys(R.NODES)) for (const b of Object.keys(R.NODES)) ok(R.routeDistance(a, b) < 20, `${a} 到不了 ${b}`);
 
 console.log('== 隨機對局');
 let seed = 12345; const rnd = () => (seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296;
@@ -106,17 +119,14 @@ for (let n = 0; n < 30000; n++) {
     }
     for (const a of g.armies) {
       ok((a.state === 'crossing') === (R.NODES[a.node].kind === 'river'), '在河中才是渡河中' + ctx());
-      ok(a.state !== 'disordered' || SOUTH.includes(a.node) === (a.side === 'blue'), '自己這一岸不會有未成列' + ctx());
+
       ok(Array.isArray(a.trail) && a.trail[a.trail.length - 1] === a.node, '行軍軌跡終點要等於所在點' + ctx());
     }
     if (g.status === 'playing') {
       for (const r of g.armies.filter(a => a.side === 'red')) for (const b of g.armies.filter(a => a.side === 'blue')) {
         ok(r.node !== b.node, '敵對部隊不得同處一點而不分勝負' + ctx());
-        // 不得交錯而過：同一路線上，回合前紅在藍之南，回合後不得變成紅在藍之北
-        for (const list of Object.values(R.ROUTES)) {
-          const i = [r.trail[0], b.trail[0], r.node, b.node].map(x => list.indexOf(x));
-          if (i.every(x => x >= 0)) ok(!(i[0] < i[1] && i[2] > i[3]), '部隊交錯而過' + ctx());
-        }
+        // 不得交錯而過：同一回合對調位置卻沒交戰
+        ok(!(r.trail[0] === b.node && b.trail[0] === r.node && r.node !== b.node), '部隊交錯而過' + ctx());
       }
       // 視野對稱
       ok((R.visibleEnemies(g, 'red').length > 0) === (R.visibleEnemies(g, 'blue').length > 0), '看得見應該是互相的' + ctx());
@@ -132,7 +142,8 @@ for (let n = 0; n < 30000; n++) {
     if (g.status === 'playing') ok(R.publicView(g).armies.length === 0, '投影幕推演中不露兵力');
   }
   stats.games++; stats[g.status === 'red_win' ? 'red' : 'blue']++;
-  if (g.status === 'blue_win' && g.prestige === g.cfg.prestige && g.lost.red >= R.redLoseAt(g.cfg)) stats.p10win++;
+  if (g.status === 'blue_win' && g.prestige === g.cfg.prestige && /全軍覆沒/.test(g.result)) stats.p10win++;
+  stats[g.result.slice(0, 6)] = (stats[g.result.slice(0, 6)] || 0) + 1;
 }
 console.log(stats);
 console.log(fails ? `✗ 有 ${fails} 項不符` : '✓ 全部通過');

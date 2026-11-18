@@ -1,67 +1,56 @@
 // 無名之戰．雙盲推演 —— 規則引擎（純邏輯，不含畫面）
 
+// side：camp＝某方營地（敵軍攻入即勝）；其餘點位雙方都能走。kind：river＝河中渡口
 export const NODES = {
   S:  { name: '紅軍營地',   side: 'red',  kind: 'camp' },
   W1: { name: '南岸小徑',   side: 'both' },
   W2: { name: '上游淺灘',   side: 'both', kind: 'river' },
-  W3: { name: '北岸西丘',   side: 'both', kind: 'bank' },
+  W3: { name: '北岸西丘',   side: 'both' },
   W4: { name: '北岸小丘',   side: 'both' },
-  W5: { name: '西路口',     side: 'red'  },
+  W5: { name: '西路口',     side: 'both' },
   C1: { name: '南岸路口',   side: 'both' },
   C2: { name: '主渡口',     side: 'both', kind: 'river' },
-  C3: { name: '主渡口北岸', side: 'both', kind: 'bank' },
-  C4: { name: '中路',       side: 'blue' },
+  C3: { name: '主渡口北岸', side: 'both' },
+  C4: { name: '中路',       side: 'both' },
   E1: { name: '南岸小丘',   side: 'both' },
   E2: { name: '下游渡口',   side: 'both', kind: 'river' },
-  E3: { name: '下游北岸',   side: 'both', kind: 'bank' },
-  E4: { name: '東路',       side: 'blue' },
-  E5: { name: '東路口',     side: 'red'  },
+  E3: { name: '下游北岸',   side: 'both' },
+  E4: { name: '東路',       side: 'both' },
+  E5: { name: '東路口',     side: 'both' },
   H:  { name: '藍軍本陣',   side: 'blue', kind: 'camp' },
 };
 
-// 三條路線（依地理順序列出所有點，用來算距離）
-export const ROUTES = {
-  西路: ['S', 'W1', 'W2', 'W3', 'W4', 'W5', 'H'],
-  中路: ['S', 'C1', 'C2', 'C3', 'C4', 'H'],
-  東路: ['S', 'C1', 'E1', 'E2', 'E3', 'E4', 'E5', 'H'],
-  北岸沿河: ['W3', 'C3', 'E3'],
-};
+// 棋盤：地圖上相鄰的兩個點位都相連，雙方都能走，一回合走一格
+export const BOARD = [
+  // 南岸
+  ['S', 'W1'], ['S', 'C1'], ['W1', 'C1'], ['C1', 'E1'],
+  // 三個渡口（南岸 ─ 河中 ─ 北岸）
+  ['W1', 'W2'], ['W2', 'W3'], ['C1', 'C2'], ['C2', 'C3'], ['E1', 'E2'], ['E2', 'E3'],
+  // 北岸沿河
+  ['W3', 'C3'], ['C3', 'E3'],
+  // 北岸往國都
+  ['W3', 'W4'], ['W4', 'W5'], ['W5', 'H'], ['W5', 'C4'],
+  ['C3', 'C4'], ['C4', 'H'], ['C4', 'E4'], ['C4', 'E5'],
+  ['E3', 'E4'], ['E4', 'E5'], ['E5', 'H'],
+];
 export const SOUTH = new Set(['S', 'W1', 'C1', 'E1']);              // 南岸（紅軍這一岸）
 const HOMEBANK = { red: 'S', blue: 'N' };
 export const bankOf = n => (NODES[n].kind === 'river' ? 'W' : SOUTH.has(n) ? 'S' : 'N');
 
-// 各方一回合可走的路段：[起, 迄, 途經點]
-const RED_EDGES = [
-  ['S', 'W1'], ['W1', 'W2'], ['W2', 'W3'], ['W3', 'W4'], ['W4', 'W5'], ['W5', 'H'],
-  ['S', 'C1'], ['C1', 'C2'], ['C2', 'C3'], ['C3', 'H', 'C4'],
-  ['C1', 'E1'], ['E1', 'E2'], ['E2', 'E3'], ['E3', 'E5', 'E4'], ['E5', 'H'],
-  ['W3', 'C3'], ['C3', 'E3'],                       // 北岸沿河的路
-];
-const BLUE_EDGES = [
-  ['H', 'W4', 'W5'], ['W4', 'W3'],
-  ['H', 'C4'], ['C4', 'C3'],
-  ['H', 'E4', 'E5'], ['E4', 'E3'],
-  ['W3', 'C3'], ['C3', 'E3'],                       // 北岸沿河的路
-  // 渡河，以及過河後在南岸走的路（和紅軍一樣）
-  ['W3', 'W2'], ['W2', 'W1'], ['W1', 'S'],
-  ['C3', 'C2'], ['C2', 'C1'], ['C1', 'S'],
-  ['E3', 'E2'], ['E2', 'E1'], ['E1', 'C1'],
-];
-// 被攔在對方專用點位時的出路（單向：只能離開，不能走進去）
-const RED_EXIT = [['C4', 'H'], ['C4', 'C3'], ['E4', 'E5'], ['E4', 'E3']];
-const BLUE_EXIT = [['W5', 'H'], ['W5', 'W4'], ['E5', 'H'], ['E5', 'E4']];
+const NB = {};
+for (const [a, b] of BOARD) { (NB[a] ||= []).push(b); (NB[b] ||= []).push(a); }
+// 每一方能走的路：棋盤上的相鄰點位（雙方相同）
+export const ADJ = { red: {}, blue: {} };
+for (const s of ['red', 'blue']) for (const n of Object.keys(NODES)) ADJ[s][n] = Object.fromEntries((NB[n] || []).map(m => [m, [n, m]]));
+export const EDGES = { red: BOARD, blue: BOARD };
 
-function buildAdj(edges, exits) {
-  const adj = {};
-  for (const [a, b, via] of edges) {
-    (adj[a] ||= {})[b] = via ? [a, via, b] : [a, b];
-    (adj[b] ||= {})[a] = via ? [b, via, a] : [b, a];
-  }
-  for (const [a, b] of exits) (adj[a] ||= {})[b] = [a, b];
-  return adj;
+// 兩點之間最少要走幾格（看得見的距離也用這個算）
+const DIST = {};
+for (const a of Object.keys(NODES)) {
+  DIST[a] = { [a]: 0 }; const q = [a];
+  while (q.length) { const n = q.shift(); for (const m of NB[n] || []) if (!(m in DIST[a])) { DIST[a][m] = DIST[a][n] + 1; q.push(m); } }
 }
-export const ADJ = { red: buildAdj(RED_EDGES, RED_EXIT), blue: buildAdj(BLUE_EDGES, BLUE_EXIT) };
-export const EDGES = { red: RED_EDGES, blue: BLUE_EDGES };
+export const routeDistance = (a, b) => DIST[a]?.[b] ?? Infinity;
 
 // 站在河岸點可以「出擊」渡口，打正在渡河的敵軍（雙方都可以）
 export const STRIKE = { blue: { W3: 'W2', C3: 'C2', E3: 'E2' }, red: { W1: 'W2', C1: 'C2', E1: 'E2' } };
@@ -97,10 +86,9 @@ export const DEFAULTS = {
 // 裁判可調的參數範圍
 export const LIMITS = { redUnits: [2, 12], blueUnits: [1, 9], maxTurns: [4, 30], sightRange: [1, 4], strikeBonus: [1, 3], prestigeHit: [0, 5] };
 
-export const VERSION = 4;   // 資料格式版本：不同就不沿用舊房間的戰局
+export const VERSION = 5;   // 資料格式版本：不同就不沿用舊房間的戰局
 export const STATE_LABEL = { formed: '已成列', crossing: '渡河中', disordered: '未成列' };
 export const sideName = s => (s === 'red' ? '紅軍' : '藍軍');
-export const redLoseAt = cfg => Math.ceil(cfg.redUnits / 2);
 const fmt = n => (Math.abs(n - Math.round(n)) < 1e-9 ? String(Math.round(n)) : n.toFixed(1).replace(/\.0$/, ''));
 const isWeak = a => a.state === 'crossing' || a.state === 'disordered';
 
@@ -122,15 +110,6 @@ export function newGame(opts = {}) {
     seen: { red: {}, blue: {} },  // 各方記得的敵軍最後位置
     log: [],
   };
-}
-
-export function routeDistance(a, b) {
-  let best = Infinity;
-  for (const list of Object.values(ROUTES)) {
-    const i = list.indexOf(a), j = list.indexOf(b);
-    if (i >= 0 && j >= 0) best = Math.min(best, Math.abs(i - j));
-  }
-  return best;
 }
 
 // 某部隊可下的命令
@@ -275,7 +254,7 @@ export function resolveTurn(prev, orders) {
 
   // 5. 交戰
   const retreated = [];
-  for (const bt of battles) fight(g, bt, say, retreated);
+  for (const bt of battles) fight(g, bt, say, retreated, plans);
 
   // 6. 重新列陣（沒被打斷才算完成）
   for (const p of plans) {
@@ -317,7 +296,7 @@ export function resolveTurn(prev, orders) {
   return g;
 }
 
-function fight(g, bt, say, retreated) {
+function fight(g, bt, say, retreated, plans) {
   const cfg = g.cfg, { node, rs, bs, ford } = bt;
   const sum = ps => ps.reduce((s, p) => s + p.army.units, 0);
   const weakOf = ps => ps.filter(p => isWeak(p.army)).reduce((s, p) => s + p.army.units, 0);
@@ -344,7 +323,9 @@ function fight(g, bt, say, retreated) {
     while (left > 0 && arr.some(p => p.army.units > 0)) for (const p of arr) if (left > 0 && p.army.units > 0) { p.army.units--; left--; g.lost[side]++; }
   };
   const fallBack = (ps, side, onlyMovers) => {
-    const foePath = new Set((side === 'red' ? bs : rs).flatMap(q => q.army.trail));
+    // 退路不能穿過任何敵軍：這回合所有敵軍走過的點位與所在位置（不只這一仗的對手）
+    const foes = plans.filter(q => q.army.side !== side && q.army.units > 0);
+    const foePath = new Set(foes.flatMap(q => [...q.army.trail, q.army.node]));
     foePath.delete(node);
     for (const p of ps) {
       const a = p.army;
@@ -420,7 +401,7 @@ function checkEnd(g, say) {
   if (red.some(a => a.node === 'H')) { g.status = 'red_win'; g.result = '紅軍攻入藍軍本陣，紅軍勝。'; }
   else if (blue.some(a => a.node === 'S')) { g.status = 'blue_win'; g.result = '藍軍渡河攻入紅軍營地，藍軍勝。'; }
   else if (!blue.length) { g.status = 'red_win'; g.result = '藍軍全軍覆沒，紅軍勝。'; }
-  else if (g.lost.red >= redLoseAt(g.cfg)) { g.status = 'blue_win'; g.result = `紅軍折損過半（${g.lost.red}／${g.cfg.redUnits}），藍軍勝。`; }
+  else if (!red.length) { g.status = 'blue_win'; g.result = '紅軍全軍覆沒，藍軍勝。'; }
   else if (g.turn >= g.cfg.maxTurns) { g.status = 'blue_win'; g.result = `${g.cfg.maxTurns} 回合內紅軍未能攻入，藍軍守住國都，藍軍勝。`; }
   if (g.status !== 'playing') { g.result += `藍軍國君聲望 ${g.prestige}／${g.cfg.prestige}。`; say(g.result); }
 }
@@ -449,4 +430,45 @@ export function publicView(g) {
   return { ver: VERSION, turn: g.turn, status: g.status, result: g.result, cfg: g.cfg, lost: g.lost, prestige: over ? g.prestige : null,
     armies: over ? g.armies : [], fallen: over ? (g.fallen || []) : [],
     log: pickLog(g.log, x => over || x.vis === 'all') };
+}
+
+// ===== 態勢提示 =====
+// 依目前看得見的敵我位置，給這一方的提示。draft：還沒送出的移動 [{ from, to, n }]，用來提醒下令的風險
+export function situation(view, side, draft = []) {
+  const c = view.cfg, pct = Math.round(c.disorderFactor * 100), bonus = c.strikeBonus;
+  const me = sideName(side), foe = sideName(side === 'red' ? 'blue' : 'red');
+  const NN = n => NODES[n].name;
+  const st = a => a.state === 'crossing' ? '正在渡河' : a.state === 'disordered' ? '剛登岸、尚未列陣' : '';
+  const power = a => a.units * (isWeak(a) ? c.disorderFactor : 1);
+  const out = [], seen = new Set();
+  const add = (kind, t) => { if (!seen.has(t)) { seen.add(t); out.push({ kind, t }); } };
+  const prestigeNote = side === 'blue' ? `；但和未成列的紅軍交戰，國君聲望 −${c.prestigeHit}` : '';
+  for (const e of view.enemies) {
+    const near = view.mine.filter(m => routeDistance(m.node, e.node) <= 1);
+    if (!near.length) {
+      const d = Math.min(...view.mine.map(m => routeDistance(m.node, e.node)));
+      add('info', `發現${foe} ${e.units} 個單位在${NN(e.node)}${st(e) ? '（' + st(e) + '）' : ''}，距我軍 ${d} 格。`);
+      continue;
+    }
+    if (isWeak(e)) add('chance', `${foe} ${e.units} 個單位在${NN(e.node)}${st(e)}，戰力只剩 ${pct}%。此時進攻對我有利（擊其不整，戰力 ×${bonus}）${prestigeNote}。`);
+    for (const m of near) {
+      if (isWeak(m)) add('danger', `我軍在${NN(m.node)}${st(m)}，戰力只剩 ${pct}%；${foe} ${e.units} 個單位就在${NN(e.node)}，對方此時進攻有利。${m.state === 'crossing' ? '可以繼續登岸、退回原岸，或撥兵接應。' : '建議原地重新列陣，或先退回。'}`);
+      else if (!isWeak(e)) {
+        const a = power(m), b = power(e);
+        add(a >= b ? 'info' : 'danger', `${foe} ${e.units} 個單位已成列，在${NN(e.node)}，與我軍${NN(m.node)} ${m.units} 個單位相鄰；正面交戰戰力 ${fmt(a)} 對 ${fmt(b)}${a < b ? '，對我不利' : a > b ? '，對我有利' : '，勢均力敵'}。`);
+      }
+    }
+  }
+  // 下令提醒
+  for (const d of draft) {
+    const foes = view.enemies.filter(e => routeDistance(e.node, d.to) <= 1);
+    if (!foes.length) continue;
+    const f = foes.map(e => `${NN(e.node)}的${foe} ${e.units} 個單位`).join('、');
+    if (NODES[d.to].kind === 'river') add('order', `命令提醒：${d.n} 個單位要進入${NN(d.to)}渡河，渡河時戰力只剩 ${pct}%；${f}可以趁你半渡出擊。`);
+    else if (bankOf(d.to) !== HOMEBANK[side] && NODES[d.from].kind === 'river') add('order', `命令提醒：${d.n} 個單位登上${NN(d.to)}後尚未列陣，戰力只剩 ${pct}%；${f}就在附近。`);
+    const target = view.enemies.find(e => e.node === d.to);
+    if (target && isWeak(target) && side === 'blue') add('order', `命令提醒：攻擊${NN(d.to)}${st(target)}的紅軍，國君聲望會 −${c.prestigeHit}。`);
+  }
+  const rank = { danger: 0, order: 1, chance: 2, info: 3 };
+  return out.sort((a, b) => rank[a.kind] - rank[b.kind]);
 }
