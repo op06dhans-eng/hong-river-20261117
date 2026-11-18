@@ -593,17 +593,17 @@ function stepTween(now) {
 SCN.mode = () => mode;
 
 // ---------- 操作 ----------
-const ptrs = new Map(); let lastPinch = 0, lastMid = null, btn = 0, downAt = null;
+const ptrs = new Map(); let lastPinch = 0, lastMid = null, lastAng = null, btn = 0, downAt = null;
 canvas.addEventListener('contextmenu', e => e.preventDefault());
-canvas.addEventListener('pointerdown', e => { canvas.setPointerCapture(e.pointerId); ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY }); btn = e.button; downAt = { x: e.clientX, y: e.clientY, t: performance.now(), moved: 0 }; if (ptrs.size === 2) { const [a, b] = [...ptrs.values()]; lastPinch = Math.hypot(a.x - b.x, a.y - b.y); lastMid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }; downAt = null; } });
-canvas.addEventListener('pointerup', e => { ptrs.delete(e.pointerId); lastMid = null; if (downAt && downAt.moved < 6 && performance.now() - downAt.t < 600 && btn === 0) pick(e.clientX, e.clientY); downAt = null; });
-canvas.addEventListener('pointercancel', e => { ptrs.delete(e.pointerId); lastMid = null; downAt = null; });
+canvas.addEventListener('pointerdown', e => { canvas.setPointerCapture(e.pointerId); ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY }); btn = e.button; downAt = { x: e.clientX, y: e.clientY, t: performance.now(), moved: 0 }; if (ptrs.size === 2) { const [a, b] = [...ptrs.values()]; lastPinch = Math.hypot(a.x - b.x, a.y - b.y); lastMid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }; lastAng = Math.atan2(b.y - a.y, b.x - a.x); downAt = null; } });
+canvas.addEventListener('pointerup', e => { ptrs.delete(e.pointerId); lastMid = null; lastAng = null; lastPinch = 0; if (downAt && downAt.moved < 6 && performance.now() - downAt.t < 600 && btn === 0) pick(e.clientX, e.clientY); downAt = null; });
+canvas.addEventListener('pointercancel', e => { ptrs.delete(e.pointerId); lastMid = null; lastAng = null; lastPinch = 0; downAt = null; });
 function pan(dx, dy) { const s = orb.r * .0018; const fx = -Math.sin(orb.th), fz = -Math.cos(orb.th); const rx = Math.cos(orb.th), rz = -Math.sin(orb.th); orb.target.x += (-dx * rx + dy * fx) * s; orb.target.z += (-dx * rz + dy * fz) * s; orb.target.x = Math.max(-95, Math.min(95, orb.target.x)); orb.target.z = Math.max(-75, Math.min(75, orb.target.z)); }
 function zoom(f) { if (mode === 'orbit') orb.r = Math.max(orb.minR, Math.min(orb.maxR, orb.r * f)); else look.fov = Math.max(8, Math.min(64, look.fov * f)); }
 canvas.addEventListener('pointermove', e => {
   if (!ptrs.has(e.pointerId) || tween) return; const p = ptrs.get(e.pointerId); const dx = e.clientX - p.x, dy = e.clientY - p.y; p.x = e.clientX; p.y = e.clientY; if (downAt) downAt.moved += Math.abs(dx) + Math.abs(dy);
-  if (ptrs.size === 2) { const [a, b] = [...ptrs.values()]; const d = Math.hypot(a.x - b.x, a.y - b.y); const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }; if (lastPinch) zoom(lastPinch / d); if (lastMid && mode === 'orbit') pan(mid.x - lastMid.x, mid.y - lastMid.y); lastPinch = d; lastMid = mid; applyCam(); return; }
-  if (mode === 'orbit') { if (btn === 2 || e.shiftKey || e.pointerType === 'touch') pan(dx, dy); else { orb.th -= dx * .005; orb.ph = Math.max(.12, Math.min(1.42, orb.ph - dy * .004)); } }
+  if (ptrs.size === 2) { const [a, b] = [...ptrs.values()]; const d = Math.hypot(a.x - b.x, a.y - b.y); const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }; if (lastPinch) zoom(lastPinch / d); const ang = Math.atan2(b.y - a.y, b.x - a.x); if (lastMid && mode === 'orbit') { pan(mid.x - lastMid.x, mid.y - lastMid.y); if (lastAng != null) { let da = ang - lastAng; if (da > Math.PI) da -= 2 * Math.PI; if (da < -Math.PI) da += 2 * Math.PI; orb.th -= da; } } lastPinch = d; lastMid = mid; lastAng = ang; applyCam(); return; }
+  if (mode === 'orbit') { if (btn === 2 || e.shiftKey) pan(dx, dy); else { orb.th -= dx * .005; orb.ph = Math.max(.12, Math.min(1.42, orb.ph - dy * .004)); } }
   else { const k = look.fov / 60; look.yaw += dx * .004 * k; look.pitch = Math.max(-.7, Math.min(.5, look.pitch + dy * .004 * k)); }
   applyCam();
 });
