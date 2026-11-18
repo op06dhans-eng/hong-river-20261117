@@ -8,10 +8,13 @@ const SIDE_NAME = { red: '紅軍', blue: '藍軍', ref: '裁判', screen: '投�
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const parse = v => (v == null ? null : typeof v === 'string' ? JSON.parse(v) : v);
 const NN = n => R.NODES[n].name;
+// 網址加 &local=1：同一台電腦、同一個瀏覽器的幾個視窗直接互通，不經過網路資料庫
+const LOCAL = params.get('local') === '1';
+const LQ = LOCAL ? '&local=1' : '';
 
 // ====================== 同步層 ======================
 async function makeBackend() {
-  const cfg = window.FIREBASE_CONFIG;
+  const cfg = LOCAL ? null : window.FIREBASE_CONFIG;
   if (cfg) {
     const { initializeApp } = await import('https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js');
     const { getDatabase, ref, onValue, set } = await import('https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js');
@@ -57,7 +60,7 @@ if (!['red', 'blue', 'ref', 'screen'].includes(role) || (!room && role !== 'ref'
 if (role === 'ref' && !room) {
   const abc = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   room = Array.from({ length: 4 }, () => abc[Math.floor(Math.random() * abc.length)]).join('');
-  history.replaceState(null, '', `?role=ref&room=${room}`);
+  history.replaceState(null, '', `?role=ref&room=${room}${LQ}`);
 }
 document.body.classList.add('role-' + role);
 
@@ -312,7 +315,7 @@ function helpHtml(side, c) {
 }
 
 const be = await makeBackend();
-if (be.mode === 'local') document.body.insertAdjacentHTML('beforeend', '<div id="banner">單機測試模式</div>');
+if (be.mode === 'local') document.body.insertAdjacentHTML('beforeend', '<div id="banner">單機模式：只和同一個瀏覽器的視窗互通</div>');
 
 // ====================== 學生（紅／藍） ======================
 if (role === 'red' || role === 'blue') {
@@ -525,7 +528,7 @@ if (role === 'ref') {
   $('#hide').onclick = () => { const b = $('#refbox'), off = b.style.display === 'none'; b.style.display = off ? '' : 'none'; $('#hide').textContent = off ? '收合面板' : '顯示面板'; resize(); };
 
   const base = location.href.split('?')[0];
-  const link = r => `${base}?role=${r}&room=${room}`;
+  const link = r => `${base}?role=${r}&room=${room}${LQ}`;
   const qr = txt => { const q = qrcode(0, 'M'); q.addData(txt); q.make(); return q.createSvgTag({ cellSize: 3, margin: 1 }); };
 
   async function publish(g, pushHist = true) {
