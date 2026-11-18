@@ -2,17 +2,17 @@
 
 export const NODES = {
   S:  { name: '紅軍營地',   side: 'red',  kind: 'camp' },
-  W1: { name: '南岸小徑',   side: 'red'  },
-  W2: { name: '上游淺灘',   side: 'red',  kind: 'river' },
+  W1: { name: '南岸小徑',   side: 'both' },
+  W2: { name: '上游淺灘',   side: 'both', kind: 'river' },
   W3: { name: '北岸西丘',   side: 'both', kind: 'bank' },
   W4: { name: '北岸小丘',   side: 'both' },
   W5: { name: '西路口',     side: 'red'  },
-  C1: { name: '南岸路口',   side: 'red'  },
-  C2: { name: '主渡口',     side: 'red',  kind: 'river' },
+  C1: { name: '南岸路口',   side: 'both' },
+  C2: { name: '主渡口',     side: 'both', kind: 'river' },
   C3: { name: '主渡口北岸', side: 'both', kind: 'bank' },
   C4: { name: '中路',       side: 'blue' },
-  E1: { name: '南岸小丘',   side: 'red'  },
-  E2: { name: '下游渡口',   side: 'red',  kind: 'river' },
+  E1: { name: '南岸小丘',   side: 'both' },
+  E2: { name: '下游渡口',   side: 'both', kind: 'river' },
   E3: { name: '下游北岸',   side: 'both', kind: 'bank' },
   E4: { name: '東路',       side: 'blue' },
   E5: { name: '東路口',     side: 'red'  },
@@ -24,18 +24,28 @@ export const ROUTES = {
   西路: ['S', 'W1', 'W2', 'W3', 'W4', 'W5', 'H'],
   中路: ['S', 'C1', 'C2', 'C3', 'C4', 'H'],
   東路: ['S', 'C1', 'E1', 'E2', 'E3', 'E4', 'E5', 'H'],
+  北岸沿河: ['W3', 'C3', 'E3'],
 };
+export const SOUTH = new Set(['S', 'W1', 'C1', 'E1']);              // 南岸（紅軍這一岸）
+const HOMEBANK = { red: 'S', blue: 'N' };
+export const bankOf = n => (NODES[n].kind === 'river' ? 'W' : SOUTH.has(n) ? 'S' : 'N');
 
 // 各方一回合可走的路段：[起, 迄, 途經點]
 const RED_EDGES = [
   ['S', 'W1'], ['W1', 'W2'], ['W2', 'W3'], ['W3', 'W4'], ['W4', 'W5'], ['W5', 'H'],
   ['S', 'C1'], ['C1', 'C2'], ['C2', 'C3'], ['C3', 'H', 'C4'],
   ['C1', 'E1'], ['E1', 'E2'], ['E2', 'E3'], ['E3', 'E5', 'E4'], ['E5', 'H'],
+  ['W3', 'C3'], ['C3', 'E3'],                       // 北岸沿河的路
 ];
 const BLUE_EDGES = [
   ['H', 'W4', 'W5'], ['W4', 'W3'],
   ['H', 'C4'], ['C4', 'C3'],
   ['H', 'E4', 'E5'], ['E4', 'E3'],
+  ['W3', 'C3'], ['C3', 'E3'],                       // 北岸沿河的路
+  // 渡河，以及過河後在南岸走的路（和紅軍一樣）
+  ['W3', 'W2'], ['W2', 'W1'], ['W1', 'S'],
+  ['C3', 'C2'], ['C2', 'C1'], ['C1', 'S'],
+  ['E3', 'E2'], ['E2', 'E1'], ['E1', 'C1'],
 ];
 // 被攔在對方專用點位時的出路（單向：只能離開，不能走進去）
 const RED_EXIT = [['C4', 'H'], ['C4', 'C3'], ['E4', 'E5'], ['E4', 'E3']];
@@ -53,15 +63,29 @@ function buildAdj(edges, exits) {
 export const ADJ = { red: buildAdj(RED_EDGES, RED_EXIT), blue: buildAdj(BLUE_EDGES, BLUE_EXIT) };
 export const EDGES = { red: RED_EDGES, blue: BLUE_EDGES };
 
-// 河岸點與對岸渡口（藍軍「出擊」用）
-export const STRIKE = { W3: 'W2', C3: 'C2', E3: 'E2' };
+// 站在河岸點可以「出擊」渡口，打正在渡河的敵軍（雙方都可以）
+export const STRIKE = { blue: { W3: 'W2', C3: 'C2', E3: 'E2' }, red: { W1: 'W2', C1: 'C2', E1: 'E2' } };
+// 渡口兩岸：某一方被擊退時，退回自己這一岸
+const OWN_BANK = { red: { W2: 'W1', C2: 'C1', E2: 'E1' }, blue: { W2: 'W3', C2: 'C3', E2: 'E3' } };
+// 對岸登陸點對應的渡口
+const LANDING = { red: { W3: 'W2', C3: 'C2', E3: 'E2' }, blue: { W1: 'W2', C1: 'C2', E1: 'E2' } };
 
-// 戰敗且原本就守在該點時的撤退方向
-const BACK = {
-  red:  { S: 'S', W1: 'S', W2: 'W1', W3: 'W2', W4: 'W3', W5: 'W4', C1: 'S', C2: 'C1', C3: 'C2', C4: 'C3',
-          E1: 'C1', E2: 'E1', E3: 'E2', E4: 'E3', E5: 'E4', H: 'H' },
-  blue: { H: 'H', W5: 'H', W4: 'H', W3: 'W4', C4: 'H', C3: 'C4', E4: 'H', E5: 'H', E3: 'E4' },
-};
+// 戰敗且原本就守在該點時的撤退方向：往自己營地走一步
+const HOME = { red: 'S', blue: 'H' };
+const BACK = {};
+for (const side of ['red', 'blue']) {
+  // 每個點位走回營地要幾步（照這一方實際能走的方向算，含只能離開的出路）
+  const dist = { [HOME[side]]: 0 };
+  for (let changed = true; changed;) {
+    changed = false;
+    for (const n of Object.keys(ADJ[side])) for (const m of Object.keys(ADJ[side][n])) if (m in dist && !(dist[n] <= dist[m] + 1)) { dist[n] = dist[m] + 1; changed = true; }
+  }
+  BACK[side] = {};
+  for (const n of Object.keys(NODES)) {
+    if (n === HOME[side] || !(n in dist)) { BACK[side][n] = n; continue; }
+    BACK[side][n] = Object.keys(ADJ[side][n]).filter(m => m in dist).sort((a, b) => dist[a] - dist[b])[0] || n;
+  }
+}
 
 export const DEFAULTS = {
   redUnits: 6, blueUnits: 3, maxTurns: 12, sightRange: 2,
@@ -73,7 +97,7 @@ export const DEFAULTS = {
 // 裁判可調的參數範圍
 export const LIMITS = { redUnits: [2, 12], blueUnits: [1, 9], maxTurns: [4, 30], sightRange: [1, 4], strikeBonus: [1, 3], prestigeHit: [0, 5] };
 
-export const VERSION = 3;   // 資料格式版本：不同就不沿用舊房間的戰局
+export const VERSION = 4;   // 資料格式版本：不同就不沿用舊房間的戰局
 export const STATE_LABEL = { formed: '已成列', crossing: '渡河中', disordered: '未成列' };
 export const sideName = s => (s === 'red' ? '紅軍' : '藍軍');
 export const redLoseAt = cfg => Math.ceil(cfg.redUnits / 2);
@@ -112,9 +136,10 @@ export function routeDistance(a, b) {
 // 某部隊可下的命令
 export function legalOrders(game, army) {
   const opts = [{ type: 'hold', label: '原地固守' }];
-  if (army.side === 'red' && army.state === 'disordered') opts.push({ type: 'regroup', label: '重新列陣（停一回合）' });
+  if (army.state === 'disordered') opts.push({ type: 'regroup', label: '重新列陣（停一回合）' });
   for (const to of Object.keys(ADJ[army.side][army.node] || {})) opts.push({ type: 'move', to, label: `移動到 ${NODES[to].name}` });
-  if (army.side === 'blue' && STRIKE[army.node]) opts.push({ type: 'strike', to: STRIKE[army.node], label: `出擊 ${NODES[STRIKE[army.node]].name}` });
+  const sk = STRIKE[army.side][army.node];
+  if (sk) opts.push({ type: 'strike', to: sk, label: `出擊 ${NODES[sk].name}` });
   return opts;
 }
 
@@ -126,9 +151,9 @@ export function parseOrders(a, raw) {
   const movers = [];
   for (const o of list.slice(0, 12)) {
     if (!o || typeof o !== 'object') continue;
-    if (o.type === 'regroup') { if (a.side === 'red' && a.state === 'disordered') regroup = true; continue; }
+    if (o.type === 'regroup') { if (a.state === 'disordered') regroup = true; continue; }
     const okMove = o.type === 'move' && ADJ[a.side][a.node]?.[o.to];
-    const okStrike = o.type === 'strike' && a.side === 'blue' && STRIKE[a.node] === o.to;
+    const okStrike = o.type === 'strike' && STRIKE[a.side][a.node] === o.to;
     if (!okMove && !okStrike) continue;
     if (left <= 0) break;
     let n = Math.floor(Number(o.count)); if (!(n >= 1)) n = left;
@@ -147,22 +172,28 @@ function contact(r, b) {
   const rp = eff(r), bp = eff(b);
   const rEnd = rp[rp.length - 1], bEnd = bp[bp.length - 1];
   const at = n => ({ node: n, ri: rp.indexOf(n), bi: bp.indexOf(n) });
+  if (r.strikeTo && b.strikeTo) return null;                                  // 隔河各自出擊，碰不到
   if (b.strikeTo) {
-    if (rp.includes(bp[0])) return at(bp[0]);                                   // 紅軍走上出擊部隊所在的河岸
-    if (rEnd === b.strikeTo) return { node: b.strikeTo, ri: rp.length - 1, bi: 0, ford: true }; // 紅軍在渡口被擊
+    if (rp.includes(bp[0])) return at(bp[0]);                                 // 紅軍走上出擊部隊所在的河岸
+    if (rEnd === b.strikeTo) return { node: b.strikeTo, ri: rp.length - 1, bi: 0 };   // 紅軍在渡口被擊
+    return null;
+  }
+  if (r.strikeTo) {
+    if (bp.includes(rp[0])) return at(rp[0]);
+    if (bEnd === r.strikeTo) return { node: r.strikeTo, ri: 0, bi: bp.length - 1 };
     return null;
   }
   const shared = rp.filter(n => bp.includes(n));
   if (!shared.length) return null;
-  if (rEnd === bEnd) return at(rEnd);                                           // 走到同一點
-  if (rp.length === 1 || bp.length === 1) return at(shared[0]);                 // 一方不動，另一方經過或抵達
+  if (rEnd === bEnd) return at(rEnd);                                         // 走到同一點
+  if (rp.length === 1 || bp.length === 1) return at(shared[0]);               // 一方不動，另一方經過或抵達
   if (shared.length === 1) {
     const n = shared[0];
-    if (n === rp[0] || n === bp[0]) return null;                                // 一方離開、另一方才到：追不上
+    if (n === rp[0] || n === bp[0]) return null;                              // 一方離開、另一方才到：追不上
     return at(n);
   }
   const sameDir = bp.indexOf(shared[0]) < bp.indexOf(shared[1]);
-  return sameDir ? null : at(shared[0]);                                        // 對向而行：路上相遇
+  return sameDir ? null : at(shared[0]);                                      // 對向而行：路上相遇
 }
 
 // ===== 回合結算 =====
@@ -221,10 +252,8 @@ export function resolveTurn(prev, orders) {
     a.node = endOf(p);
     a.trail = eff(p);
     p.moved = a.node !== p.start;
-    if (a.side === 'red') {
-      if (NODES[a.node].kind === 'river') a.state = 'crossing';
-      else if (NODES[p.start].kind === 'river' && p.moved) a.state = NODES[a.node].kind === 'bank' ? 'disordered' : 'formed';
-    }
+    if (NODES[a.node].kind === 'river') a.state = 'crossing';
+    else if (NODES[p.start].kind === 'river' && p.moved) a.state = bankOf(a.node) === HOMEBANK[a.side] ? 'formed' : 'disordered';
   }
 
   // 4. 找出交戰：同一點位的敵對部隊；以及藍軍出擊渡口
@@ -232,17 +261,16 @@ export function resolveTurn(prev, orders) {
   const at = {};
   for (const p of plans) (at[p.army.node] ||= { rs: [], bs: [] })[p.army.side === 'red' ? 'rs' : 'bs'].push(p);
   for (const [node, grp] of Object.entries(at)) if (grp.rs.length && grp.bs.length) battles.push({ node, rs: grp.rs, bs: grp.bs, ford: false });
-  const fords = {};
-  for (const b of blues) {
-    if (!b.strikeTo) continue;
-    if (at[b.army.node].rs.length) continue;              // 河岸上已有敵軍，就地接戰，不再出擊
-    b.army.trail = [b.start, b.strikeTo, b.start];        // 畫面上衝到渡口再回來
-    (fords[b.strikeTo] ||= []).push(b);
-  }
-  for (const [ford, bs] of Object.entries(fords)) {
-    const rs = at[ford]?.rs || [];
-    if (rs.length) battles.push({ node: ford, rs, bs, ford: true });
-    else say(`藍軍自${NODES[bs[0].start].name}出擊${NODES[ford].name}，渡口沒有敵軍，撲空而回。`, 'blue');
+  for (const p of plans) {
+    if (!p.strikeTo) continue;
+    const foe = p.army.side === 'red' ? 'bs' : 'rs', mine = p.army.side === 'red' ? 'rs' : 'bs';
+    if (at[p.army.node][foe].length) continue;                // 河岸上已有敵軍，就地接戰，不再出擊
+    p.army.trail = [p.start, p.strikeTo, p.start];            // 畫面上衝到渡口再回來
+    const there = at[p.strikeTo];
+    if (!there || !there[foe].length) { say(`${sideName(p.army.side)}自${NODES[p.start].name}出擊${NODES[p.strikeTo].name}，渡口沒有敵軍，撲空而回。`, p.army.side); continue; }
+    let bt = battles.find(x => x.node === p.strikeTo);
+    if (!bt) battles.push(bt = { node: p.strikeTo, rs: [...there.rs], bs: [...there.bs], ford: true, strikers: [] });
+    bt[mine].push(p); bt.ford = true; (bt.strikers ||= []).push(p);
   }
 
   // 5. 交戰
@@ -250,10 +278,11 @@ export function resolveTurn(prev, orders) {
   for (const bt of battles) fight(g, bt, say, retreated);
 
   // 6. 重新列陣（沒被打斷才算完成）
-  for (const p of reds) {
+  for (const p of plans) {
     if (p.order.type !== 'regroup' || p.army.units <= 0) continue;
-    if (p.interrupted) say(`紅軍在${NODES[p.start].name}列陣被打斷，仍未成列。`);
-    else { p.army.state = 'formed'; say(`紅軍在${NODES[p.army.node].name}重新列陣完畢。`, 'red'); }
+    const sn = sideName(p.army.side);
+    if (p.interrupted) say(`${sn}在${NODES[p.start].name}列陣被打斷，仍未成列。`);
+    else if (p.army.node === p.start) { p.army.state = 'formed'; say(`${sn}在${NODES[p.army.node].name}重新列陣完畢。`, p.army.side); }
   }
 
   // 7. 陣亡、退路被截
@@ -290,22 +319,24 @@ export function resolveTurn(prev, orders) {
 
 function fight(g, bt, say, retreated) {
   const cfg = g.cfg, { node, rs, bs, ford } = bt;
-  const rU = rs.reduce((s, p) => s + p.army.units, 0), bU = bs.reduce((s, p) => s + p.army.units, 0);
-  const weakU = rs.filter(p => isWeak(p.army)).reduce((s, p) => s + p.army.units, 0);
-  const redEff = (rU - weakU) + weakU * cfg.disorderFactor;
-  const mult = 1 + (cfg.strikeBonus - 1) * (weakU / rU);
-  const blueEff = bU * mult;
-  const stLabel = weakU === 0 ? '已成列' : weakU < rU ? '部分未成列' : rs.every(p => p.army.state === 'crossing') ? '渡河中' : '未成列';
-  say(`【${NODES[node].name}之戰】紅軍 ${rU}（${stLabel}，戰力 ${fmt(redEff)}）對藍軍 ${bU}（戰力 ${fmt(blueEff)}${weakU && mult > 1 ? `，擊其不整 ×${fmt(mult)}` : ''}）。`);
+  const sum = ps => ps.reduce((s, p) => s + p.army.units, 0);
+  const weakOf = ps => ps.filter(p => isWeak(p.army)).reduce((s, p) => s + p.army.units, 0);
+  const rU = sum(rs), bU = sum(bs), rW = weakOf(rs), bW = weakOf(bs);
+  const label = (ps, U, W) => W === 0 ? '' : W < U ? '部分未成列' : ps.every(p => p.army.state === 'crossing') ? '渡河中' : '未成列';
+  const rL = label(rs, rU, rW), bL = label(bs, bU, bW);
+  // 未成列、渡河中的部隊戰力打折；打這種敵人的一方，依對方不整的比例加成
+  const rBon = 1 + (cfg.strikeBonus - 1) * (bW / bU), bBon = 1 + (cfg.strikeBonus - 1) * (rW / rU);
+  const redEff = ((rU - rW) + rW * cfg.disorderFactor) * rBon;
+  const blueEff = ((bU - bW) + bW * cfg.disorderFactor) * bBon;
+  const desc = (U, L, eff, bon) => `${U}（${L ? L + '，' : ''}戰力 ${fmt(eff)}${bon > 1 ? `，擊其不整 ×${fmt(bon)}` : ''}）`;
+  say(`【${NODES[node].name}之戰】紅軍 ${desc(rU, rL, redEff, rBon)}對藍軍 ${desc(bU, bL, blueEff, bBon)}。`);
 
-  // 聲望：藍軍主動出手（出擊渡口，或自己走進交戰點）攻擊渡河中／未成列的紅軍
-  const blueInit = ford || bs.some(p => p.moved);
-  if (weakU && blueInit && cfg.prestigeHit > 0) {
+  // 聲望：藍軍和渡河中、未成列的紅軍交戰，不論誰先動手，都算「擊其未濟、擊其未陣」
+  if (rW && cfg.prestigeHit > 0) {
     g.prestige = Math.max(0, g.prestige - cfg.prestigeHit);
-    say(`藍軍趁紅軍${stLabel === '渡河中' ? '渡河未畢' : '尚未成列'}而擊，諸侯議論藍君不仁：國君聲望 −${cfg.prestigeHit}（剩 ${g.prestige}）。`);
+    say(`藍軍趁紅軍${rL === '渡河中' ? '渡河未畢' : '尚未成列'}而擊，諸侯議論藍君不仁：國君聲望 −${cfg.prestigeHit}（剩 ${g.prestige}）。`);
   }
-  for (const p of rs) if (p.order.type === 'regroup') p.interrupted = true;
-  for (const p of [...rs, ...bs]) p.fellAt = node;
+  for (const p of [...rs, ...bs]) { if (p.order.type === 'regroup') p.interrupted = true; p.fellAt = node; }
 
   const lose = (ps, n, side) => {
     let left = n;
@@ -313,25 +344,33 @@ function fight(g, bt, say, retreated) {
     while (left > 0 && arr.some(p => p.army.units > 0)) for (const p of arr) if (left > 0 && p.army.units > 0) { p.army.units--; left--; g.lost[side]++; }
   };
   const fallBack = (ps, side, onlyMovers) => {
+    const foePath = new Set((side === 'red' ? bs : rs).flatMap(q => q.army.trail));
+    foePath.delete(node);
     for (const p of ps) {
       const a = p.army;
-      if (a.units <= 0 || p.strikeTo && ford) continue;        // 出擊的部隊本來就在河岸，不必退
+      if (a.units <= 0) continue;
+      if (p.strikeTo && ford) continue;                 // 出擊的部隊本來就在河岸，不必退
       if (onlyMovers && !p.moved) continue;
-      // 往遠離敵軍的方向退：不退向敵軍這回合走過的點位
-      const foePath = new Set((side === 'red' ? bs : rs).flatMap(q => q.army.trail));
-      foePath.delete(node);
+      // 在水中、或剛登上對岸還沒列陣就吃了敗仗：被逐回自己這一岸
+      const ford0 = NODES[node].kind === 'river' ? node : isWeak(a) ? LANDING[side][node] : null;
+      if (ford0) {
+        const dest = OWN_BANK[side][ford0];
+        if (foePath.has(dest) || (ford0 !== node && foePath.has(ford0))) {
+          say(`${sideName(side)}退路被截，${a.units} 個單位潰散。`); g.lost[side] += a.units; a.units = 0; continue;
+        }
+        a.trail = [...a.trail, ...(ford0 !== node ? [ford0] : []), dest];
+        a.node = dest; a.state = 'formed';
+        say(`${sideName(side)}被逐回${NODES[dest].name}。`);
+        retreated.push(p); continue;
+      }
+      // 其餘往遠離敵軍的方向退：不退向敵軍這回合走過的點位
       const cands = [...(p.moved ? [p.start] : []), BACK[side][node]];
       const dest = cands.find(d => !foePath.has(d));
-      if (dest === undefined) {
-        say(`${sideName(side)}在${NODES[node].name}退路被截，${a.units} 個單位潰散。`);
-        g.lost[side] += a.units; a.units = 0; continue;
-      }
+      if (dest === undefined) { say(`${sideName(side)}在${NODES[node].name}退路被截，${a.units} 個單位潰散。`); g.lost[side] += a.units; a.units = 0; continue; }
       if (dest === a.node) continue;
       a.node = dest; a.trail = [...a.trail, dest];
-      if (side === 'red') {
-        if (NODES[dest].kind === 'river') a.state = 'crossing';
-        else if (NODES[node].kind === 'river') a.state = 'formed';   // 從河裡退回南岸
-      }
+      if (NODES[dest].kind === 'river') a.state = 'crossing';
+      else if (NODES[node].kind === 'river') a.state = bankOf(dest) === HOMEBANK[side] ? 'formed' : 'disordered';
       retreated.push(p);
     }
   };
@@ -351,8 +390,8 @@ function fight(g, bt, say, retreated) {
   else { n = 1; wn = 1; text = '小挫後撤'; }
   lose(L, n, lSide);
   if (wn) lose(W, wn, wSide);
-  fallBack(L, lSide, false);
   say(`${sideName(wSide)}勝，${sideName(lSide)}${text}（損 ${n}${wn ? `，勝方亦損 ${wn}` : ''}）。`);
+  fallBack(L, lSide, false);
 }
 
 export function visibleEnemies(g, side) {
@@ -379,6 +418,7 @@ function checkEnd(g, say) {
   const red = g.armies.filter(a => a.side === 'red');
   const blue = g.armies.filter(a => a.side === 'blue');
   if (red.some(a => a.node === 'H')) { g.status = 'red_win'; g.result = '紅軍攻入藍軍本陣，紅軍勝。'; }
+  else if (blue.some(a => a.node === 'S')) { g.status = 'blue_win'; g.result = '藍軍渡河攻入紅軍營地，藍軍勝。'; }
   else if (!blue.length) { g.status = 'red_win'; g.result = '藍軍全軍覆沒，紅軍勝。'; }
   else if (g.lost.red >= redLoseAt(g.cfg)) { g.status = 'blue_win'; g.result = `紅軍折損過半（${g.lost.red}／${g.cfg.redUnits}），藍軍勝。`; }
   else if (g.turn >= g.cfg.maxTurns) { g.status = 'blue_win'; g.result = `${g.cfg.maxTurns} 回合內紅軍未能攻入，藍軍守住國都，藍軍勝。`; }

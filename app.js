@@ -1,4 +1,4 @@
-import * as R from './rules.js?v=9';
+import * as R from './rules.js?v=13';
 
 const $ = s => document.querySelector(s);
 const params = new URLSearchParams(location.search);
@@ -211,6 +211,20 @@ function drawArrows(items) {
   });
   SCN.dirty();
 })(0);
+// 北岸沿河的路：原地形上沒有，另外畫成土黃色虛線
+{
+  const mat = new THREE.MeshBasicMaterial({ color: '#d8b46a', fog: false });
+  for (const [a0, b0] of [['W3', 'C3'], ['C3', 'E3']]) {
+    const A = wp(a0), B = wp(b0), L = A.distanceTo(B), n = Math.floor(L / 2.3);
+    for (let i = 2; i < n - 2; i += 1) {
+      if (i % 2) continue;
+      const t = i / n, x = A.x + (B.x - A.x) * t, z = A.z + (B.z - A.z) * t;
+      const m = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.08, 2.0), mat);
+      m.position.set(x, Math.max(SCN.H(x, z), 0.05) + 0.08, z); m.rotation.y = Math.atan2(B.x - A.x, B.z - A.z);
+      SCN.scene.add(m);
+    }
+  }
+}
 const myNodes = side => NODE_IDS.filter(n => R.NODES[n].side === side || R.NODES[n].side === 'both');
 const allNodeMarks = () => Object.fromEntries(NODE_IDS.map(n => [n, n === 'H' ? 'blue' : n === 'S' ? 'red' : R.NODES[n].side]));
 
@@ -304,14 +318,16 @@ function helpHtml(side, c) {
     <p>• 送出命令後，要等老師結算，雙方才會<b>同時</b>行動。</p>`;
   if (side === 'red') return `<h2>你是紅軍</h2>
     <p>你率紅軍 ${c.redUnits} 個單位自南方來，必須渡過南河。<b>任何一支部隊攻入藍軍本陣就獲勝。</b></p>${common}
-    <p>• 站在渡口（河中）時戰力只剩 ${pct}%；上岸後也只有 ${pct}%，要按「重新列陣」原地停一回合才恢復。列陣時被攻擊，列陣會被打斷。</p>
-    <p>• 折損 ${R.redLoseAt(c)} 個單位就算戰敗；第 ${c.maxTurns} 回合結束還沒攻入藍軍本陣，也算戰敗。</p>`;
+    <p>• 站在渡口（河中）時戰力只剩 ${pct}%；登上北岸後也只有 ${pct}%，要按「重新列陣」原地停一回合才恢復。列陣時被攻擊，列陣會被打斷。</p>
+    <p>• 在河中、或剛登岸還沒列陣就吃了敗仗，會被逐回南岸。</p>
+    <p>• 藍軍也可以渡河來攻。藍軍在河中時，你站在南岸點可以「出擊」渡口打他。</p>
+    <p>• 折損 ${R.redLoseAt(c)} 個單位就算戰敗；藍軍攻入你的營地、或第 ${c.maxTurns} 回合結束還沒攻入藍軍本陣，也算戰敗。</p>`;
   return `<h2>你是藍軍</h2>
-    <p>你率藍軍 ${c.blueUnits} 個單位守國都，敵眾我寡。<b>讓紅軍折損 ${R.redLoseAt(c)} 個單位，或守到第 ${c.maxTurns} 回合結束，就獲勝。</b></p>${common}
-    <p>• 你只能在北岸行動，不渡河。</p>
+    <p>你率藍軍 ${c.blueUnits} 個單位守國都，敵眾我寡。<b>讓紅軍折損 ${R.redLoseAt(c)} 個單位、攻入紅軍營地，或守到第 ${c.maxTurns} 回合結束，就獲勝。</b></p>${common}
     <p>• 紅軍在河中或上岸還沒列陣時，戰力只剩 ${pct}%，而你打這種敵人戰力 ×${c.strikeBonus}。站在河岸點可以「出擊」對岸渡口。</p>
+    <p>• 你也可以渡河突擊南岸。但渡河中、登上南岸還沒列陣時，你同樣只有 ${pct}% 戰力，紅軍也能出擊渡口打你；吃了敗仗會被逐回北岸。</p>
     <p>• 紅軍列好陣後和你正面交戰，你多半打不過。</p>
-    <p>• <b>聲望</b>：你是以諸侯盟主自居的國君，聲望滿分 ${c.prestige}。<b>主動攻擊</b>還在渡河、或上岸還沒列陣的紅軍（「出擊」渡口，或走進他們所在的點位），就算打贏，也會被諸侯議論不仁，每次交戰聲望 −${c.prestigeHit}。紅軍自己衝上你守住的點位則不扣。結算時同時看<b>戰果</b>與<b>聲望</b>。</p>`;
+    <p>• <b>聲望</b>：你是以諸侯盟主自居的國君，聲望滿分 ${c.prestige}。只要和還在渡河、或上岸還沒列陣的紅軍交戰（出擊渡口、走進他們所在的點位，或守在河岸等他們登岸撞上來），就算打贏，也會被諸侯議論不仁，每次交戰聲望 −${c.prestigeHit}。想保住聲望，就得在紅軍登岸前退開，等他們列好陣再戰。出擊撲空不扣。結算時同時看<b>戰果</b>與<b>聲望</b>。</p>`;
 }
 
 const be = await makeBackend();
@@ -490,7 +506,7 @@ if (role === 'red' || role === 'blue') {
       for (const o of R.legalOrders(null, sa)) {
         if (o.type !== 'move' && o.type !== 'strike') continue;
         const k = okey(o);
-        h += row(k, o.type === 'strike' ? `出擊 ${NN(o.to)}<small>（聲望−${c.prestigeHit}）</small>` : `→ ${NN(o.to)}`, m[k] || 0, '', o.type === 'strike' ? 'strike' : '');
+        h += row(k, o.type === 'strike' ? `出擊 ${NN(o.to)}${side === 'blue' ? '<small>（打到紅軍才扣聲望）</small>' : ''}<small>（打完回原地）</small>` : R.NODES[o.to].kind === 'river' && R.bankOf(sa.node) !== 'W' ? `渡河 → ${NN(o.to)}` : `→ ${NN(o.to)}`, m[k] || 0, '', o.type === 'strike' ? 'strike' : '');
       }
       h += row('stay', stayLabel, stay, '', 'stay');
       h += '</div><div class="muted hint">按＋把兵力從「留在原地」撥過去；撥到兩處以上就是分兵。也可以直接點地圖上的綠圈。</div>';
