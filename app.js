@@ -219,7 +219,7 @@ let lastW = 0, lastH = 0;
 function resize() {
   const dock = $('#panel,#refbox,#screenbox');
   let w = innerWidth, h = innerHeight, dr = 0;
-  if (dock && getComputedStyle(dock).display !== 'none') {
+  if (dock && getComputedStyle(dock).display !== 'none' && !dock.classList.contains('mini')) {
     const r = dock.getBoundingClientRect();
     if (r.height >= innerHeight - 2 && r.width < innerWidth - 60) { dr = Math.round(r.width); w -= dr; } else h -= Math.round(r.height);
   }
@@ -357,6 +357,7 @@ if (role === 'red' || role === 'blue') {
     const mine = view.status !== 'playing' ? view.mine : view.mine.flatMap(a => !isSplit(a) ? [a] : groups(a).map((g, i) => ({ ...a, id: `${a.id}#${i}`, units: g.n, tag: TEAM[i] + '隊', trail: null })));
     return { armies: [...mine, ...view.enemies], ghosts: view.ghosts.map(gh => ({ ...gh, side: side === 'red' ? 'blue' : 'red' })), fallen: view.fallen };
   }
+  let mini = false; try { mini = localStorage.getItem('hong-mini') === '1'; } catch (e) { }   // 面板收合
   const splitKey = () => (view.status === 'playing' ? view.mine.filter(isSplit).map(a => a.id + ':' + groups(a).map(g => g.n).join('/')).join(',') : '');
 
   be.on(`view/${side}`, v => {
@@ -456,14 +457,21 @@ if (role === 'red' || role === 'blue') {
     drawArrows(playing ? view.mine.flatMap(a => groups(a).map((g, i) => g.to ? { from: a.node, to: g.to, side, strike: g.type === 'strike', text: isSplit(a) ? `${TEAM[i]}隊` : '' } : null).filter(Boolean)) : []);
     // 面板
     const c = view.cfg;
-    let h = `<div class="phead"><b>第 ${view.turn}／${c.maxTurns} 回合</b><span class="muted">${side === 'red' ? `已折損 ${view.lost.red}（滿 ${R.redLoseAt(c)} 即敗）` : `紅軍已折損 ${view.lost.red}／${R.redLoseAt(c)}，我軍折損 ${view.lost.blue}`}</span></div>`;
+    const tog = `<button class="tog" id="tog">${mini ? '展開' : '收合'}</button>`;
+    let h = `<div class="phead"><b>第 ${view.turn}／${c.maxTurns} 回合</b><span class="muted">${side === 'red' ? `已折損 ${view.lost.red}（滿 ${R.redLoseAt(c)} 即敗）` : `紅軍已折損 ${view.lost.red}／${R.redLoseAt(c)}，我軍折損 ${view.lost.blue}`}</span>${tog}</div>`;
     if (view.prestige != null) h += `<div class="prest">${prestigeBar(view.prestige, c.prestige)}</div>`;
     if (!playing) {
+      h = h.replace(tog, ''); $('#panel').classList.remove('mini');
       h += `<p class="result"><b>${esc(view.result)}</b></p><button class="btn main" id="again">看結果與揭曉</button>`;
       $('#panel').innerHTML = h; resize();
       $('#again').onclick = () => modal(`<h2>${esc(view.result)}</h2>${logHtml(view.log.slice(-1))}${REVEAL}`);
       return;
     }
+    if (mini) {
+      h += `<button class="btn main ${sub && !changed ? 'sent' : ''}" id="send">${!sub ? '送出本回合命令' : changed ? '命令有修改：重新送出' : '✓ 已送出（可修改後再送）'}</button>`;
+      $('#panel').innerHTML = h; $('#panel').classList.add('mini'); resize(); bindPanel(); return;
+    }
+    $('#panel').classList.remove('mini');
     h += '<div class="chips">';
     for (const a of view.mine) {
       const gs = groups(a);
@@ -490,8 +498,12 @@ if (role === 'red' || role === 'blue') {
     h += `<button class="btn main ${sub && !changed ? 'sent' : ''}" id="send">${!sub ? '送出本回合命令' : changed ? '命令有修改：重新送出' : '✓ 已送出（可修改後再送）'}</button>`;
     if (sub && !changed) h += '<div class="waitnote">命令已送達。<b>老師結算後，雙方部隊才會同時行動</b>，在那之前部隊會留在原地。</div>';
     $('#panel').innerHTML = h;
-    resize();
+    resize(); bindPanel();
+  }
+  function bindPanel() {
+    const playing = view.status === 'playing'; const sa = playing ? view.mine.find(a => a.id === sel) : null;
     const P = $('#panel');
+    $('#tog').onclick = () => { mini = !mini; try { localStorage.setItem('hong-mini', mini ? '1' : '0'); } catch (e) { } render(); };
     P.querySelectorAll('.chip').forEach(el => el.onclick = () => { if (sel === el.dataset.id) sel = null; else { sel = el.dataset.id; selG = 0; } render(); if (sel) focusSel(); else focusMine(); });
     if ($('#split')) $('#split').onclick = () => splitArmy(sa);
     if ($('#merge')) $('#merge').onclick = () => mergeArmy(sa);
