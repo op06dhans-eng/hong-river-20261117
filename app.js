@@ -13,28 +13,47 @@ const LOCAL = params.get('local') === '1';
 const LQ = LOCAL ? '&local=1' : '';
 
 // ====================== 同步層 ======================
+// 連線狀態：顯示在畫面上方，出問題時一看就知道
+function setNet(st, msg) {
+  let d = document.getElementById('net');
+  if (!d) { d = document.createElement('div'); d.id = 'net'; document.body.appendChild(d); }
+  d.className = st;
+  d.textContent = st === 'ok' ? '● 已連線' : st === 'off' ? '● 連線中斷，正在重連…' : '● 連線錯誤：' + (msg || '');
+  clearTimeout(setNet._t); if (st === 'ok') setNet._t = setTimeout(() => d.classList.add('fade'), 2500);
+}
 async function makeBackend() {
   const cfg = LOCAL ? null : window.FIREBASE_CONFIG;
-  if (cfg) {
+  if (cfg) try {
     const { initializeApp } = await import('https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js');
     const { getDatabase, ref, onValue, set } = await import('https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js');
     const db = getDatabase(initializeApp(cfg));
+    // 連線狀態燈
+    onValue(ref(db, '.info/connected'), s => setNet(s.val() ? 'ok' : 'off'));
     return {
       mode: 'firebase',
       set: (p, v) => set(ref(db, `hong/${room}/${p}`), v ?? null),
-      on: (p, cb) => onValue(ref(db, `hong/${room}/${p}`), s => cb(s.val())),
+      on: (p, cb) => onValue(ref(db, `hong/${room}/${p}`), s => cb(s.val()), e => setNet('err', e.message)),
     };
+  } catch (e) {
+    setNet('err', '無法載入連線程式：' + e.message);
+    return null;
   }
-  const bc = new BroadcastChannel('hong-river');
+  // 瀏覽器不准存資料（例如某些預覽視窗）時，改存在記憶體，只限這個視窗
+  const mem = {};
+  const store = {
+    get: k => { try { return localStorage.getItem(k); } catch (e) { return k in mem ? mem[k] : null; } },
+    set: (k, v) => { try { localStorage.setItem(k, v); } catch (e) { mem[k] = v; } },
+  };
+  let bc = null; try { bc = new BroadcastChannel('hong-river'); } catch (e) { }
   const key = p => `hong:${room}:${p}`;
   const subs = {};
-  const read = p => { const v = localStorage.getItem(key(p)); return v == null ? null : JSON.parse(v); };
+  const read = p => { const v = store.get(key(p)); if (v == null) return null; try { return JSON.parse(v); } catch (e) { return null; } };
   const fire = p => (subs[p] || []).forEach(cb => cb(read(p)));
-  bc.onmessage = e => { if (e.data.room === room) fire(e.data.p); };
+  if (bc) bc.onmessage = e => { if (e.data && e.data.room === room) fire(e.data.p); };
   addEventListener('storage', e => { const pre = `hong:${room}:`; if (e.key && e.key.startsWith(pre)) fire(e.key.slice(pre.length)); });
   return {
     mode: 'local',
-    set: (p, v) => { localStorage.setItem(key(p), JSON.stringify(v ?? null)); bc.postMessage({ room, p }); fire(p); return Promise.resolve(); },
+    set: (p, v) => { store.set(key(p), JSON.stringify(v ?? null)); try { bc?.postMessage({ room, p }); } catch (e) { } fire(p); return Promise.resolve(); },
     on: (p, cb) => { (subs[p] ||= []).push(cb); cb(read(p)); },
   };
 }
@@ -55,7 +74,7 @@ if (!['red', 'blue', 'ref', 'screen'].includes(role) || (!room && role !== 'ref'
   const go = r => { const code = $('#hroom').value.trim().toUpperCase(); if (!code) { $('#hroom').focus(); $('#hroom').placeholder = '請先輸入房號'; return; } location.search = `?role=${r}&room=${encodeURIComponent(code)}`; };
   $('#hr').onclick = () => go('red'); $('#hb').onclick = () => go('blue');
   $('#hk').onclick = () => { location.search = '?role=ref'; };
-  throw new Error('home');
+  await new Promise(() => { });   // 停在首頁，等使用者點選（不丟出錯誤）
 }
 if (role === 'ref' && !room) {
   const abc = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -331,6 +350,13 @@ function helpHtml(side, c) {
 }
 
 const be = await makeBackend();
+if (!be) {
+  document.getElementById('loading')?.remove();
+  document.body.insertAdjacentHTML('beforeend', `<div class="modal"><div class="card"><h2>連不上網路資料庫</h2>
+    <p>這台裝置載入不了連線程式，可能是網路不通，或學校網路擋住了 Google 的服務（gstatic.com、firebasedatabase.app）。</p>
+    <p>請確認可以上網後重新整理。老師若只是要在同一台電腦上測試，可以在網址最後加上 <b>&amp;local=1</b>。</p></div></div>`);
+  await new Promise(() => { });
+}
 if (be.mode === 'local') document.body.insertAdjacentHTML('beforeend', '<div id="banner">單機模式：只和同一個瀏覽器的視窗互通</div>');
 
 // ====================== 學生（紅／藍） ======================

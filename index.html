@@ -140,6 +140,8 @@
   #home input{font:inherit;font-size:18px;padding:8px;width:100%;border-radius:8px;border:1px solid var(--line);margin:6px 0;text-transform:uppercase}
   #home .row .btn{padding:11px;font-weight:700}
   .hline{border-top:1px solid var(--line);margin:16px 0 8px}
+  #net{position:fixed;left:8px;bottom:8px;z-index:28;font-size:12px;padding:3px 9px;border-radius:10px;background:#1d8c4a;color:#fff;transition:opacity .6s;pointer-events:none}
+  #net.fade{opacity:0} #net.off{background:#b8860b} #net.err{background:#b3261e;max-width:80vw}
 </style>
 <link rel="stylesheet" href="world.css?v=10">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -153,6 +155,6 @@
 <div id="loading">正在鋪設地形……</div>
 <div id="top"></div>
 <div id="ui"></div>
-<script type="module" src="app.js?v=13"></script>
+<script type="module" src="app.js?v=14"></script>
 </body>
 </html>
